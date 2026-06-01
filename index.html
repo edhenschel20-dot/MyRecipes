@@ -458,7 +458,7 @@ function RecipeBook() {
         {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={setLightbox} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
-        {tab==="import" && <ImportTab onImport={r=>{upsertRecipe(r);}} />}
+        {tab==="import" && <ImportTab onImport={r=>{ upsertRecipe(r); setEditRecipe(r); setTab("library"); }} />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{upsertRecipe(r);setShowAdd(false);setEditRecipe(null);}} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
       {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
