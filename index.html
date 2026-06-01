@@ -517,7 +517,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <button className={`fav-filter-btn${filterFavorites?" active":""}`} onClick={()=>setFilterFavorites(f=>!f)}>❤️ Favorites</button>
       </div>
       {selectedRecipe ? (
-        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} />
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} />
       ) : recipes.length===0 ? (
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
@@ -796,7 +796,17 @@ function DinnerTab({recipes,selection,setSelection,onStartCook}) {
 
 // ── AI Discovery ───────────────────────────────────────────────────────────
 function DiscoverTab({recipes,onAddRecipe}) {
-  const [request, setRequest] = useState("");
+  // ── Preferences (persisted) ──────────────────────────────────────────────
+  const [prefs, setPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("recipebook_prefs")||"{}"); } catch { return {}; }
+  });
+  function savePrefs(p) { setPrefs(p); try { localStorage.setItem("recipebook_prefs", JSON.stringify(p)); } catch {} }
+
+  // ── Wizard state ─────────────────────────────────────────────────────────
+  const [step, setStep] = useState(0); // 0=intro, 1-5=wizard steps, 6=prompt ready
+  const [selections, setSelections] = useState({
+    protein: "", cooker: "", flavor: [], occasion: "", notes: "", servings: "4"
+  });
   const [pasteText, setPasteText] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -805,19 +815,113 @@ function DiscoverTab({recipes,onAddRecipe}) {
 
   const savedTitles = recipes.map(r=>r.title).join(", ");
 
-  function buildPrompt(req) {
-    return `You are a culinary assistant. My existing recipes: ${savedTitles||"none"}.
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const PROTEINS = [
+    {label:"🥩 Beef", value:"beef"},
+    {label:"🍗 Chicken", value:"chicken"},
+    {label:"🐷 Pork", value:"pork"},
+    {label:"🐟 Fish/Seafood", value:"fish or seafood"},
+    {label:"🦆 Game/Wild", value:"game or wild meat"},
+    {label:"🥦 Veggie", value:"vegetables or plant-based"},
+    {label:"🍳 Eggs/Dairy", value:"eggs or dairy"},
+    {label:"🍝 Pasta/Grains", value:"pasta or grains"},
+  ];
 
-My request: ${req}
+  const COOKERS = [
+    {label:"🔥 Blackstone 36\"", value:"Blackstone 36-inch flat top griddle", notes:"High heat, fast sear, great for smash burgers, stir fry, breakfast foods, and searing"},
+    {label:"💨 Pit Boss Smoker", value:"Pit Boss pellet smoker", notes:"Low and slow smoking, wood pellet flavor, great for brisket, ribs, pulled pork, and smoked veggies"},
+    {label:"🍳 Stovetop", value:"stovetop (cast iron or stainless pan)", notes:""},
+    {label:"♨️ Oven", value:"oven", notes:""},
+    {label:"🔥 Gas/Charcoal Grill", value:"gas or charcoal grill", notes:""},
+    {label:"⚡ Instant Pot", value:"Instant Pot pressure cooker", notes:""},
+    {label:"🐢 Slow Cooker", value:"slow cooker or crockpot", notes:""},
+    {label:"🍟 Air Fryer", value:"air fryer", notes:""},
+  ];
 
-Reply with ONLY a valid JSON object. No markdown, no text before or after.
-Fields required: title, cuisine, categories (array), servings, prepTime, cookTime, description, tags (array), diets (array), calories, protein, carbs, fat, fiber, ingredients (array of strings with amounts), steps (array of strings).
+  const FLAVORS_BY_COOKER = {
+    "Blackstone 36-inch flat top griddle": [
+      {label:"🧄 Garlic Butter", value:"garlic butter, rich and savory"},
+      {label:"🌶 Spicy & Hot", value:"spicy, hot, with chili or peppers"},
+      {label:"🍋 Citrus & Bright", value:"citrus, bright, lemon or lime forward"},
+      {label:"🥢 Asian-Inspired", value:"Asian-inspired, soy, ginger, sesame"},
+      {label:"🧅 Caramelized", value:"caramelized onions and sweet savory"},
+      {label:"🌮 Tex-Mex", value:"Tex-Mex, cumin, chili, bold"},
+      {label:"🫒 Mediterranean", value:"Mediterranean, herbs, olive oil"},
+      {label:"🍔 Classic American", value:"classic American, simple and bold"},
+    ],
+    "Pit Boss pellet smoker": [
+      {label:"💨 Classic Smoke", value:"classic wood smoke, traditional BBQ"},
+      {label:"🍯 Sweet BBQ", value:"sweet and smoky BBQ, brown sugar, molasses"},
+      {label:"🌶 Spicy Smoke", value:"spicy smoked, chipotle, cayenne heat"},
+      {label:"🍋 Smoke & Citrus", value:"smoke with bright citrus, tangy"},
+      {label:"🌿 Herb Smoked", value:"herb crusted and smoked, rosemary thyme"},
+      {label:"🫙 Competition Style", value:"competition BBQ style, complex rub"},
+      {label:"🍷 Wine & Smoke", value:"red wine and smoke braised"},
+      {label:"☕ Coffee Rub", value:"coffee and dark chocolate rub, bold"},
+    ],
+    default: [
+      {label:"🧄 Garlic & Herb", value:"garlic, herbs, classic savory"},
+      {label:"🌶 Spicy & Hot", value:"spicy and hot, chili forward"},
+      {label:"🍋 Citrus & Bright", value:"citrus, bright, fresh"},
+      {label:"🥢 Asian-Inspired", value:"Asian-inspired, soy, ginger"},
+      {label:"🍯 Sweet & Savory", value:"sweet and savory, honey or maple"},
+      {label:"🫒 Mediterranean", value:"Mediterranean, herbs, olive oil"},
+      {label:"🌮 Bold & Smoky", value:"bold and smoky, cumin, paprika"},
+      {label:"🧅 Rich & Comforting", value:"rich, comforting, creamy"},
+    ]
+  };
+
+  const OCCASIONS = [
+    {label:"⚡ Quick Weeknight", value:"quick weeknight dinner (under 30 min)"},
+    {label:"🏆 Impress Guests", value:"impressive dinner party dish"},
+    {label:"🌅 Weekend Project", value:"weekend project, worth the time and effort"},
+    {label:"📦 Meal Prep", value:"meal prep, makes good leftovers"},
+    {label:"❤️ Date Night", value:"romantic date night dinner"},
+    {label:"👨‍👩‍👧 Family Dinner", value:"family dinner, crowd pleasing"},
+    {label:"🎉 Game Day", value:"game day food, finger food or hearty"},
+    {label:"🥗 Light & Healthy", value:"light and healthy"},
+  ];
+
+  function getFlavors() {
+    const cooker = selections.cooker;
+    return FLAVORS_BY_COOKER[cooker] || FLAVORS_BY_COOKER.default;
+  }
+
+  function sel(key, value) {
+    setSelections(s => ({...s, [key]: value}));
+  }
+  function toggleFlavor(value) {
+    setSelections(s => ({
+      ...s,
+      flavor: s.flavor.includes(value) ? s.flavor.filter(f=>f!==value) : [...s.flavor, value].slice(0,3)
+    }));
+  }
+
+  function buildPrompt() {
+    const cookerObj = COOKERS.find(c=>c.value===selections.cooker);
+    const cookerNotes = cookerObj?.notes ? ` (${cookerObj.notes})` : "";
+    const flavors = selections.flavor.join(", ");
+    const existing = savedTitles ? `My existing recipes: ${savedTitles}. Please suggest something different.` : "";
+
+    return `You are an expert culinary assistant helping me find a new recipe.
+
+${existing}
+
+Here is exactly what I am looking for:
+- Main ingredient: ${selections.protein}
+- Cooking method: ${selections.cooker}${cookerNotes}
+- Flavor profile: ${flavors||"your best recommendation"}
+- Occasion: ${selections.occasion}
+- Servings: ${selections.servings}
+${selections.notes ? `- Additional notes: ${selections.notes}` : ""}
+
+Please create a recipe perfectly suited to this. Reply with ONLY a valid JSON object, no markdown, no text before or after. Fields required: title, cuisine, categories (array), servings (number), prepTime (number in minutes), cookTime (number in minutes), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts like "2 tbsp butter"), steps (array of strings).
 Categories pick from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
 Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat`;
   }
 
   async function copyPrompt() {
-    const prompt = buildPrompt(request);
+    const prompt = buildPrompt();
     try { await navigator.clipboard.writeText(prompt); }
     catch {
       const ta = document.createElement("textarea");
@@ -829,8 +933,7 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
   }
 
   function openClaude() {
-    const prompt = buildPrompt(request);
-    window.open("https://claude.ai/new?q=" + encodeURIComponent(prompt), "_blank");
+    window.open("https://claude.ai/new?q=" + encodeURIComponent(buildPrompt()), "_blank");
   }
 
   function parseAndPreview() {
@@ -842,7 +945,7 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
       setResult({...parsed, id:uid(), aiGenerated:true, photo:null,
         categories:parsed.categories||[], diets:parsed.diets||[], tags:parsed.tags||[]});
     } catch {
-      setError("Couldn't parse that. Make sure you copied the full JSON from Claude — it should start with { and end with }");
+      setError("Could not parse. Make sure you copied the full JSON from Claude.");
     }
   }
 
@@ -850,52 +953,224 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
     if(!result) return;
     onAddRecipe(result);
     setSavedList(s=>[...s, result.title]);
-    setResult(null); setPasteText(""); setRequest("");
+    setResult(null); setPasteText("");
   }
 
-  const QUICK = [
-    "A smoked beef recipe — not roast beef, something impressive",
-    "A quick weeknight dinner with chicken and pantry staples",
-    "A show-stopping appetizer for a dinner party",
-    "A hearty soup that reheats well for meal prep",
+  function resetWizard() {
+    setStep(0);
+    setSelections({protein:"",cooker:prefs.defaultCooker||"",flavor:[],occasion:"",notes:"",servings:"4"});
+    setPasteText(""); setResult(null); setError("");
+  }
+
+  // Wizard step config
+  const canAdvance = [
+    true,
+    !!selections.protein,
+    !!selections.cooker,
+    selections.flavor.length > 0,
+    !!selections.occasion,
+    true,
   ];
 
-  return (
+  // ── Styles ────────────────────────────────────────────────────────────────
+  const chipStyle = (active) => ({
+    padding:'10px 14px', borderRadius:6, border: active ? '2px solid var(--saffron)' : '2px solid var(--parchment-dark)',
+    background: active ? 'rgba(212,137,26,0.12)' : 'var(--cream)',
+    cursor:'pointer', fontSize:14, fontWeight: active ? 700 : 400,
+    color: active ? 'var(--saffron)' : 'var(--ink)', transition:'all 0.15s',
+    display:'flex', alignItems:'center', gap:6, userSelect:'none',
+    WebkitTapHighlightColor:'transparent',
+  });
+
+  const chipGrid = {display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:10, marginBottom:20};
+
+  const stepTitle = (num, title) => (
+    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+      <div style={{width:28,height:28,borderRadius:'50%',background:'var(--saffron)',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Special Elite',monospace",fontSize:13,flexShrink:0}}>{num}</div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>{title}</div>
+    </div>
+  );
+
+  // ── RENDER ────────────────────────────────────────────────────────────────
+
+  // Step 0 — Intro / Equipment setup
+  if(step === 0) return (
     <div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>✨ AI Recipe Discovery</div>
-      <p className="text-muted" style={{marginBottom:20}}>Describe what you want → open Claude → paste the result back to save it.</p>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>✨ Recipe Builder</div>
+      <p className="text-muted" style={{marginBottom:24}}>Answer a few quick questions and we'll build the perfect recipe prompt for you.</p>
 
       <div className="ai-panel" style={{marginBottom:16}}>
-        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Step 1 — Describe what you want</div>
-        <textarea
-          className="ai-input"
-          style={{width:'100%',minHeight:90,resize:'vertical',marginBottom:10,padding:12,fontSize:14,borderRadius:3,display:'block'}}
-          placeholder="e.g. Something I can cook on my smoker — a lean beef that's impressive and different from roast beef..."
-          value={request}
-          onChange={e=>setRequest(e.target.value)}
-        />
-        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
-          {QUICK.map(q=>(
-            <button key={q} className="btn btn-ghost btn-sm" style={{fontSize:11,textAlign:'left'}} onClick={()=>setRequest(q)}>
-              {q.length>44?q.slice(0,44)+"…":q}
-            </button>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:12}}>Your Equipment</div>
+        <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:14,lineHeight:1.6}}>Tell us what you cook on so we can remember it and tailor every recipe suggestion to your setup.</p>
+        <div style={chipGrid}>
+          {COOKERS.map(c=>(
+            <div key={c.value} style={chipStyle((prefs.equipment||[]).includes(c.value))} onClick={()=>{
+              const eq = prefs.equipment||[];
+              const updated = eq.includes(c.value) ? eq.filter(x=>x!==c.value) : [...eq,c.value];
+              savePrefs({...prefs, equipment:updated});
+            }}>
+              {c.label} {(prefs.equipment||[]).includes(c.value) && <span style={{marginLeft:'auto',fontSize:12}}>✓</span>}
+            </div>
           ))}
         </div>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
-          <button className="btn btn-primary" onClick={openClaude} disabled={!request.trim()}>Open Claude ↗</button>
-          <button className="btn btn-outline btn-sm" onClick={copyPrompt} disabled={!request.trim()}>{copied?"✓ Copied!":"📋 Copy prompt"}</button>
+        {(prefs.equipment||[]).length > 0 && (
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--ink-mid)',marginBottom:8}}>Default cooker</div>
+            <select className="filter-select" style={{width:'100%'}} value={prefs.defaultCooker||""} onChange={e=>savePrefs({...prefs,defaultCooker:e.target.value})}>
+              <option value="">Ask me each time</option>
+              {(prefs.equipment||[]).map(eq=>{
+                const c = COOKERS.find(x=>x.value===eq);
+                return <option key={eq} value={eq}>{c?.label||eq}</option>;
+              })}
+            </select>
+          </div>
+        )}
+        <button className="btn btn-primary" onClick={()=>{ setSelections(s=>({...s,cooker:prefs.defaultCooker||""})); setStep(1); }}>
+          Start Building a Recipe →
+        </button>
+      </div>
+
+      {savedList.length>0&&(
+        <div className="ai-panel">
+          <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--sage)',marginBottom:8}}>✓ Saved this session</div>
+          {savedList.map((t,i)=><div key={i} style={{fontSize:13,color:'var(--ink-mid)',padding:'2px 0'}}>{t}</div>)}
+        </div>
+      )}
+    </div>
+  );
+
+  // Step 1 — Protein
+  if(step === 1) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(0)}>← Back</button>
+      <div className="ai-panel">
+        {stepTitle(1, "What's your main ingredient?")}
+        <div style={chipGrid}>
+          {PROTEINS.map(p=>(
+            <div key={p.value} style={chipStyle(selections.protein===p.value)} onClick={()=>sel("protein",p.value)}>
+              {p.label}
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-primary" disabled={!canAdvance[1]} onClick={()=>setStep(prefs.defaultCooker ? 3 : 2)}>
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+
+  // Step 2 — Cooker
+  if(step === 2) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(1)}>← Back</button>
+      <div className="ai-panel">
+        {stepTitle(2, "How are you cooking it?")}
+        <div style={chipGrid}>
+          {COOKERS.map(c=>(
+            <div key={c.value} style={chipStyle(selections.cooker===c.value)} onClick={()=>{ sel("cooker",c.value); sel("flavor",[]); }}>
+              {c.label}
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-primary" disabled={!canAdvance[2]} onClick={()=>setStep(3)}>Next →</button>
+      </div>
+    </div>
+  );
+
+  // Step 3 — Flavor
+  if(step === 3) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(prefs.defaultCooker ? 1 : 2)}>← Back</button>
+      <div className="ai-panel">
+        {stepTitle(3, "What flavor profile?")}
+        <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:14}}>Pick up to 3. {selections.cooker && <span style={{color:'var(--saffron)',fontWeight:700}}>Tailored for your {COOKERS.find(c=>c.value===selections.cooker)?.label}</span>}</p>
+        <div style={chipGrid}>
+          {getFlavors().map(f=>(
+            <div key={f.value} style={chipStyle(selections.flavor.includes(f.value))} onClick={()=>toggleFlavor(f.value)}>
+              {f.label} {selections.flavor.includes(f.value) && <span style={{marginLeft:'auto',fontSize:11,color:'var(--saffron)'}}>✓</span>}
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-primary" disabled={!canAdvance[3]} onClick={()=>setStep(4)}>Next →</button>
+      </div>
+    </div>
+  );
+
+  // Step 4 — Occasion
+  if(step === 4) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(3)}>← Back</button>
+      <div className="ai-panel">
+        {stepTitle(4, "What's the occasion?")}
+        <div style={chipGrid}>
+          {OCCASIONS.map(o=>(
+            <div key={o.value} style={chipStyle(selections.occasion===o.value)} onClick={()=>sel("occasion",o.value)}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-primary" disabled={!canAdvance[4]} onClick={()=>setStep(5)}>Next →</button>
+      </div>
+    </div>
+  );
+
+  // Step 5 — Details
+  if(step === 5) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(4)}>← Back</button>
+      <div className="ai-panel">
+        {stepTitle(5, "Any final details?")}
+        <div className="form-group">
+          <label className="form-label">Servings</label>
+          <select className="form-input" style={{width:'auto'}} value={selections.servings} onChange={e=>sel("servings",e.target.value)}>
+            {["1","2","4","6","8","10","12"].map(n=><option key={n} value={n}>{n} people</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Extra notes (optional)</label>
+          <textarea className="form-input form-textarea" style={{minHeight:80}} placeholder="e.g. wife doesn't like cilantro, I have mushrooms to use up, keep it under 500 calories..." value={selections.notes} onChange={e=>sel("notes",e.target.value)} />
+        </div>
+        <button className="btn btn-primary" onClick={()=>setStep(6)}>Build My Prompt →</button>
+      </div>
+    </div>
+  );
+
+  // Step 6 — Prompt ready + paste result
+  if(step === 6) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(5)}>← Back</button>
+
+      {/* Summary */}
+      <div className="ai-panel" style={{marginBottom:16}}>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:12}}>Your Recipe Request</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:16}}>
+          {[
+            {label:"🥩 "+selections.protein, show:!!selections.protein},
+            {label:"🍳 "+COOKERS.find(c=>c.value===selections.cooker)?.label, show:!!selections.cooker},
+            ...selections.flavor.map(f=>({label:f.split(",")[0], show:true})),
+            {label:OCCASIONS.find(o=>o.value===selections.occasion)?.label, show:!!selections.occasion},
+            {label:"👤 "+selections.servings, show:true},
+          ].filter(x=>x.show&&x.label).map((x,i)=>(
+            <span key={i} style={{background:'var(--parchment-dark)',padding:'4px 12px',borderRadius:20,fontSize:13,fontWeight:600}}>{x.label}</span>
+          ))}
+        </div>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          <button className="btn btn-primary" onClick={openClaude}>Open Claude ↗</button>
+          <button className="btn btn-outline btn-sm" onClick={copyPrompt}>{copied?"✓ Copied!":"📋 Copy prompt"}</button>
+          <button className="btn btn-ghost btn-sm" onClick={resetWizard}>Start Over</button>
         </div>
         <p style={{fontSize:12,color:'var(--ink-light)',marginTop:10,lineHeight:1.6}}>
-          <strong>Open Claude</strong> launches Claude.ai with your prompt ready to go. Hit send, then copy the JSON it replies with and paste it below.
+          Tap <strong>Open Claude</strong> — your full request opens pre-filled. Hit send, copy the JSON response, and paste it below.
         </p>
       </div>
 
+      {/* Paste result */}
       <div className="ai-panel">
-        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Step 2 — Paste Claude's JSON response</div>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Paste Claude's Response</div>
         <textarea
           className="ai-input"
           style={{width:'100%',minHeight:120,resize:'vertical',marginBottom:10,padding:12,fontSize:13,fontFamily:'monospace',borderRadius:3,display:'block'}}
-          placeholder="Paste the full JSON here..."
+          placeholder="Paste the full JSON from Claude here..."
           value={pasteText}
           onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}}
         />
@@ -931,7 +1206,10 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
       </div>
     </div>
   );
+
+  return null;
 }
+
 
 // ── Stashcook parser ───────────────────────────────────────────────────────
 function parseStashcook(text) {
