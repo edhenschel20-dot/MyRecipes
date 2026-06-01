@@ -557,10 +557,35 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
 
 // ── Recipe Detail ──────────────────────────────────────────────────────────
 function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite}) {
-  const [servings, setServings] = useState(recipe.servings || 4);
-  const base = recipe.servings || 4;
+  // Sanitize recipe data to prevent crashes from malformed imports
+  const safe = {
+    ...recipe,
+    title: safe.title || "Untitled",
+    servings: Number(safe.servings) || 4,
+    prepTime: Number(safe.prepTime) || 0,
+    cookTime: Number(safe.cookTime) || 0,
+    calories: safe.calories ? Number(safe.calories) : null,
+    protein: safe.protein ? Number(safe.protein) : null,
+    carbs: safe.carbs ? Number(safe.carbs) : null,
+    fat: safe.fat ? Number(safe.fat) : null,
+    fiber: safe.fiber ? Number(safe.fiber) : null,
+    sugar: safe.sugar ? Number(safe.sugar) : null,
+    sodium: safe.sodium ? Number(safe.sodium) : null,
+    ingredients: Array.isArray(safe.ingredients) ? safe.ingredients : [],
+    steps: Array.isArray(safe.steps) ? safe.steps.map(s=>typeof s==="string"?s:JSON.stringify(s)) : [],
+    tags: Array.isArray(safe.tags) ? safe.tags : [],
+    diets: Array.isArray(safe.diets) ? safe.diets : [],
+    categories: Array.isArray(safe.categories) ? safe.categories : [],
+    description: typeof safe.description === "string" ? safe.description : "",
+    cuisine: typeof safe.cuisine === "string" ? safe.cuisine : "",
+    photo: safe.photo || null,
+    favorite: !!safe.favorite,
+  };
+  const recipe2 = safe;
+  const [servings, setServings] = useState(safe.servings);
+  const base = safe.servings;
   const scale = servings / base;
-  const hasNutrition = recipe.calories || recipe.protein || recipe.carbs || recipe.fat;
+  const hasNutrition = safe.calories || safe.protein || safe.carbs || safe.fat;
 
   return (
     <div>
@@ -568,43 +593,43 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
       <div className="detail-panel">
         {/* Hero photo */}
         <div className="detail-hero">
-          {recipe.photo
-            ? <img src={recipe.photo} alt={recipe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in"}} onClick={()=>onLightbox(recipe.photo)} />
+          {safe.photo
+            ? <img src={safe.photo} alt={safe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in"}} onClick={()=>onLightbox(safe.photo)} />
             : <div className="detail-hero-placeholder">{recipeEmoji(recipe)}</div>
           }
           <div className="detail-hero-overlay" />
           <div className="detail-hero-actions">
             <button className="detail-hero-btn detail-hero-btn-primary" onClick={()=>onCook(recipe)}>▶ Cook</button>
             <button className="detail-hero-btn detail-hero-btn-light" onClick={()=>onEdit(recipe)}>Edit</button>
-            <button className="detail-hero-btn detail-hero-btn-danger" onClick={()=>onDelete(recipe.id)}>Delete</button>
+            <button className="detail-hero-btn detail-hero-btn-danger" onClick={()=>onDelete(safe.id)}>Delete</button>
           </div>
         </div>
 
         <div className="detail-content">
           <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-          <div className="detail-title" style={{marginBottom:0}}>{recipe.title}</div>
-          <button className="fav-btn" style={{fontSize:28}} onClick={()=>onToggleFavorite(recipe.id)} title={recipe.favorite?"Remove from favorites":"Add to favorites"}>{recipe.favorite?"❤️":"🤍"}</button>
+          <div className="detail-title" style={{marginBottom:0}}>{safe.title}</div>
+          <button className="fav-btn" style={{fontSize:28}} onClick={()=>onToggleFavorite(safe.id)} title={safe.favorite?"Remove from favorites":"Add to favorites"}>{safe.favorite?"❤️":"🤍"}</button>
         </div>
           <div className="detail-meta">
-            {recipe.cuisine && <span>🌍 {recipe.cuisine}</span>}
-            {recipe.prepTime!=null && <span>⏱ Prep: {recipe.prepTime} min</span>}
-            {recipe.cookTime!=null && <span>🔥 Cook: {recipe.cookTime} min</span>}
+            {safe.cuisine && <span>🌍 {safe.cuisine}</span>}
+            {safe.prepTime!=null && <span>⏱ Prep: {safe.prepTime} min</span>}
+            {safe.cookTime!=null && <span>🔥 Cook: {safe.cookTime} min</span>}
           </div>
-          {(recipe.diets||[]).length>0 && <div className="diet-badges">{recipe.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
-          {recipe.description && <p style={{fontSize:15,color:'var(--ink-mid)',lineHeight:1.6,marginTop:12}}>{recipe.description}</p>}
-          <div className="recipe-card-tags" style={{marginTop:12}}>{(recipe.tags||[]).map(t=><span key={t} className="tag">{t}</span>)}</div>
+          {(safe.diets||[]).length>0 && <div className="diet-badges">{safe.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
+          {safe.description && <p style={{fontSize:15,color:'var(--ink-mid)',lineHeight:1.6,marginTop:12}}>{safe.description}</p>}
+          <div className="recipe-card-tags" style={{marginTop:12}}>{(safe.tags||[]).map(t=><span key={t} className="tag">{t}</span>)}</div>
 
           {hasNutrition && (
             <>
               <div className="detail-section-title">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:'none',letterSpacing:0}}>per serving</span></div>
               <div className="nutrition-grid">
-                {recipe.calories && <div className="nutrition-card"><div className="nutrition-value">{recipe.calories}</div><div className="nutrition-unit">kcal</div><div className="nutrition-label">Calories</div></div>}
-                {recipe.protein && <div className="nutrition-card"><div className="nutrition-value">{recipe.protein}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Protein</div></div>}
-                {recipe.carbs && <div className="nutrition-card"><div className="nutrition-value">{recipe.carbs}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Carbs</div></div>}
-                {recipe.fat && <div className="nutrition-card"><div className="nutrition-value">{recipe.fat}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Fat</div></div>}
-                {recipe.fiber && <div className="nutrition-card"><div className="nutrition-value">{recipe.fiber}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Fiber</div></div>}
-                {recipe.sugar && <div className="nutrition-card"><div className="nutrition-value">{recipe.sugar}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Sugar</div></div>}
-                {recipe.sodium && <div className="nutrition-card"><div className="nutrition-value">{recipe.sodium}<span className="nutrition-unit">mg</span></div><div className="nutrition-label">Sodium</div></div>}
+                {safe.calories && <div className="nutrition-card"><div className="nutrition-value">{safe.calories}</div><div className="nutrition-unit">kcal</div><div className="nutrition-label">Calories</div></div>}
+                {safe.protein && <div className="nutrition-card"><div className="nutrition-value">{safe.protein}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Protein</div></div>}
+                {safe.carbs && <div className="nutrition-card"><div className="nutrition-value">{safe.carbs}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Carbs</div></div>}
+                {safe.fat && <div className="nutrition-card"><div className="nutrition-value">{safe.fat}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Fat</div></div>}
+                {safe.fiber && <div className="nutrition-card"><div className="nutrition-value">{safe.fiber}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Fiber</div></div>}
+                {safe.sugar && <div className="nutrition-card"><div className="nutrition-value">{safe.sugar}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Sugar</div></div>}
+                {safe.sodium && <div className="nutrition-card"><div className="nutrition-value">{safe.sodium}<span className="nutrition-unit">mg</span></div><div className="nutrition-label">Sodium</div></div>}
               </div>
             </>
           )}
@@ -616,10 +641,10 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
             <span className="scaler-value">{servings}</span>
             <button className="scaler-btn" onClick={()=>setServings(s=>s+1)}>+</button>
             {scale!==1 && <span className="scaler-original">(recipe makes {base})</span>}
-            {scale!==1 && recipe.calories && <span style={{marginLeft:'auto',fontSize:13,color:'var(--saffron)',fontWeight:700}}>{Math.round(recipe.calories * servings)} kcal total</span>}
+            {scale!==1 && safe.calories && <span style={{marginLeft:'auto',fontSize:13,color:'var(--saffron)',fontWeight:700}}>{Math.round(safe.calories * servings)} kcal total</span>}
           </div>
           <ul className="ingredient-list">
-            {(recipe.ingredients||[]).map((ing,i)=>{
+            {(safe.ingredients||[]).map((ing,i)=>{
               const p = parseIngredient(ing);
               const hasAmt = p.amount !== null && scale !== 1;
               return (
@@ -634,7 +659,7 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
           </ul>
 
           <div className="detail-section-title">Method</div>
-          <ol className="step-list">{(recipe.steps||[]).map((step,i)=><li key={i}>{step}</li>)}</ol>
+          <ol className="step-list">{(safe.steps||[]).map((step,i)=><li key={i}>{step}</li>)}</ol>
         </div>
       </div>
     </div>
