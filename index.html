@@ -529,7 +529,10 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
                 : <div className="recipe-card-photo-placeholder">{recipeEmoji(r)}</div>
               }
               <div className="recipe-card-body">
-                <div className="recipe-card-title">{r.title}</div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                  <div className="recipe-card-title">{r.title}</div>
+                  <button className="fav-btn" onClick={e=>{e.stopPropagation();onToggleFavorite(r.id);}}>{r.favorite?"❤️":"🤍"}</button>
+                </div>
                 <div className="recipe-card-meta">
                   {(r.categories||[]).map(c=><span key={c} style={{background:'var(--saffron)',color:'white',padding:'1px 7px',borderRadius:2,fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px'}}>{c}</span>)}
                   {r.cuisine && <span>🌍 {r.cuisine}</span>}
