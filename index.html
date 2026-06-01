@@ -783,32 +783,57 @@ Otherwise respond in plain text.`;
 function parseStashcook(text) {
   try {
     const lines = text.split("\n").map(l=>l.trim()); let i=0;
+    // Title
     while(i<lines.length && !lines[i]) i++;
     const title = lines[i++]; if(!title) return null;
-    let cookTime=0,servings=4;
-    while(i<lines.length && lines[i] && !lines[i].match(/^\d/) && !lines[i].match(/^Shared/i)) {
-      const t=lines[i].match(/Time:\s*(\d+)/i); if(t) cookTime=parseInt(t[1]);
-      const s=lines[i].match(/Servings?:\s*(\d+)/i); if(s) servings=parseInt(s[1]);
+
+    // Skip blank line between title and metadata (Stashcook always has one)
+    while(i<lines.length && !lines[i]) i++;
+
+    // Parse Time/Servings metadata lines
+    let cookTime=0, servings=4;
+    while(i<lines.length && lines[i]) {
+      const l = lines[i];
+      const t = l.match(/Time:\s*(\d+)/i); if(t) { cookTime=parseInt(t[1]); i++; continue; }
+      const s = l.match(/Servings?:\s*(\d+)/i); if(s) { servings=parseInt(s[1]); i++; continue; }
+      break; // not a metadata line
+    }
+
+    // Skip blank lines before ingredients
+    while(i<lines.length && !lines[i]) i++;
+
+    // Read ingredients: stop at blank line, footer, or numbered step "1. Capital..."
+    const ingredients=[];
+    while(i<lines.length) {
+      const l=lines[i];
+      if(!l) { i++; break; }
+      if(l.match(/^Shared/i)) break;
+      if(l.match(/^\d+\.\s+[A-Z]/)) break;
+      ingredients.push(l);
       i++;
     }
+
+    // Skip blank lines before steps
     while(i<lines.length && !lines[i]) i++;
-    const ingredients=[]; while(i<lines.length) { const l=lines[i]; if(!l){i++;break;} if(l.match(/^\d+\./)||l.match(/^Shared/i)) break; ingredients.push(l); i++; }
-    while(i<lines.length && !lines[i]) i++;
+
+    // Read numbered steps
     const steps=[]; let cur="";
     while(i<lines.length) {
       const l=lines[i];
-      if(l.match(/^Shared via/i)||l.match(/^Stash\./i)){i++;continue;}
+      if(l.match(/^Shared via/i)||l.match(/^Stash\./i)||l.match(/^https?:\/\//i)){i++;continue;}
       const n=l.match(/^(\d+)\.\s+(.*)/);
-      if(n){if(cur)steps.push(cur.trim());cur=n[2];}
-      else if(l&&cur) cur+=" "+l;
-      else if(!l&&cur){steps.push(cur.trim());cur="";}
+      if(n){ if(cur) steps.push(cur.trim()); cur=n[2]; }
+      else if(l && cur) cur+=" "+l;
+      else if(!l && cur){ steps.push(cur.trim()); cur=""; }
       i++;
     }
     if(cur.trim()) steps.push(cur.trim());
-    if(!title||!ingredients.length||!steps.length) return null;
+
+    if(!title || !ingredients.length || !steps.length) return null;
     return {id:uid(),title,cuisine:"",category:"",servings,prepTime:0,cookTime,description:"",tags:["imported","stashcook"],diets:[],calories:null,protein:null,carbs:null,fat:null,fiber:null,photo:null,ingredients,steps};
   } catch { return null; }
 }
+
 
 // ── Import Tab ─────────────────────────────────────────────────────────────
 function ImportTab({onImport}) {
