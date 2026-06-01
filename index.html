@@ -796,21 +796,25 @@ function DinnerTab({recipes,selection,setSelection,onStartCook}) {
 
 // ── AI Discovery ───────────────────────────────────────────────────────────
 function DiscoverTab({recipes,onAddRecipe}) {
-  // ── Preferences (persisted) ──────────────────────────────────────────────
+  // ── Preferences ───────────────────────────────────────────────────────────
   const [prefs, setPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem("recipebook_prefs")||"{}"); } catch { return {}; }
   });
   function savePrefs(p) { setPrefs(p); try { localStorage.setItem("recipebook_prefs", JSON.stringify(p)); } catch {} }
 
-  // ── Wizard state ─────────────────────────────────────────────────────────
-  const [step, setStep] = useState(0); // 0=intro, 1-5=wizard steps, 6=prompt ready
-  const [selections, setSelections] = useState({
-    protein: "", cooker: "", flavor: [], occasion: "", notes: "", servings: "4"
-  });
-  const [pasteText, setPasteText] = useState("");
+  // ── State ─────────────────────────────────────────────────────────────────
+  const STAGES = {SETUP:0, PROTEIN:1, COOKER:2, FLAVOR:3, OCCASION:4, DETAILS:5, IDEAS:6, RECIPE:7};
+  const [stage, setStage] = useState(STAGES.SETUP);
+  const [selections, setSelections] = useState({protein:"",cooker:"",flavor:[],occasion:"",notes:"",servings:"4"});
+  const [ideas, setIdeas] = useState([]); // [{title, description}]
+  const [ideaBatch, setIdeaBatch] = useState(1);
+  const [chosenIdea, setChosenIdea] = useState(null);
+  const [ideasPasteText, setIdeasPasteText] = useState("");
+  const [ideasError, setIdeasError] = useState("");
+  const [recipePasteText, setRecipePasteText] = useState("");
   const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [recipeError, setRecipeError] = useState("");
+  const [copied, setCopied] = useState("");
   const [savedList, setSavedList] = useState([]);
 
   const savedTitles = recipes.map(r=>r.title).join(", ");
@@ -826,41 +830,39 @@ function DiscoverTab({recipes,onAddRecipe}) {
     {label:"🍳 Eggs/Dairy", value:"eggs or dairy"},
     {label:"🍝 Pasta/Grains", value:"pasta or grains"},
   ];
-
   const COOKERS = [
-    {label:"🔥 Blackstone 36\"", value:"Blackstone 36-inch flat top griddle", notes:"High heat, fast sear, great for smash burgers, stir fry, breakfast foods, and searing"},
-    {label:"💨 Pit Boss Smoker", value:"Pit Boss pellet smoker", notes:"Low and slow smoking, wood pellet flavor, great for brisket, ribs, pulled pork, and smoked veggies"},
-    {label:"🍳 Stovetop", value:"stovetop (cast iron or stainless pan)", notes:""},
+    {label:"🔥 Blackstone 36\"", value:"Blackstone 36-inch flat top griddle", notes:"High heat, fast sear, great for smash burgers, stir fry, breakfast, searing"},
+    {label:"💨 Pit Boss Smoker", value:"Pit Boss pellet smoker", notes:"Low and slow, wood pellet flavor, great for brisket, ribs, pulled pork, smoked dishes"},
+    {label:"🍳 Stovetop", value:"stovetop (cast iron or stainless)", notes:""},
     {label:"♨️ Oven", value:"oven", notes:""},
     {label:"🔥 Gas/Charcoal Grill", value:"gas or charcoal grill", notes:""},
     {label:"⚡ Instant Pot", value:"Instant Pot pressure cooker", notes:""},
-    {label:"🐢 Slow Cooker", value:"slow cooker or crockpot", notes:""},
+    {label:"🐢 Slow Cooker", value:"slow cooker", notes:""},
     {label:"🍟 Air Fryer", value:"air fryer", notes:""},
   ];
-
   const FLAVORS_BY_COOKER = {
     "Blackstone 36-inch flat top griddle": [
       {label:"🧄 Garlic Butter", value:"garlic butter, rich and savory"},
-      {label:"🌶 Spicy & Hot", value:"spicy, hot, with chili or peppers"},
-      {label:"🍋 Citrus & Bright", value:"citrus, bright, lemon or lime forward"},
+      {label:"🌶 Spicy & Hot", value:"spicy and hot with chili"},
+      {label:"🍋 Citrus & Bright", value:"citrus, bright, lemon or lime"},
       {label:"🥢 Asian-Inspired", value:"Asian-inspired, soy, ginger, sesame"},
-      {label:"🧅 Caramelized", value:"caramelized onions and sweet savory"},
+      {label:"🧅 Caramelized", value:"caramelized sweet savory"},
       {label:"🌮 Tex-Mex", value:"Tex-Mex, cumin, chili, bold"},
       {label:"🫒 Mediterranean", value:"Mediterranean, herbs, olive oil"},
       {label:"🍔 Classic American", value:"classic American, simple and bold"},
     ],
     "Pit Boss pellet smoker": [
       {label:"💨 Classic Smoke", value:"classic wood smoke, traditional BBQ"},
-      {label:"🍯 Sweet BBQ", value:"sweet and smoky BBQ, brown sugar, molasses"},
-      {label:"🌶 Spicy Smoke", value:"spicy smoked, chipotle, cayenne heat"},
+      {label:"🍯 Sweet BBQ", value:"sweet and smoky BBQ, brown sugar"},
+      {label:"🌶 Spicy Smoke", value:"spicy smoked, chipotle, cayenne"},
       {label:"🍋 Smoke & Citrus", value:"smoke with bright citrus, tangy"},
-      {label:"🌿 Herb Smoked", value:"herb crusted and smoked, rosemary thyme"},
+      {label:"🌿 Herb Smoked", value:"herb crusted and smoked"},
       {label:"🫙 Competition Style", value:"competition BBQ style, complex rub"},
-      {label:"🍷 Wine & Smoke", value:"red wine and smoke braised"},
       {label:"☕ Coffee Rub", value:"coffee and dark chocolate rub, bold"},
+      {label:"🍷 Wine & Smoke", value:"red wine braised and smoked"},
     ],
     default: [
-      {label:"🧄 Garlic & Herb", value:"garlic, herbs, classic savory"},
+      {label:"🧄 Garlic & Herb", value:"garlic and herbs, classic savory"},
       {label:"🌶 Spicy & Hot", value:"spicy and hot, chili forward"},
       {label:"🍋 Citrus & Bright", value:"citrus, bright, fresh"},
       {label:"🥢 Asian-Inspired", value:"Asian-inspired, soy, ginger"},
@@ -870,256 +872,226 @@ function DiscoverTab({recipes,onAddRecipe}) {
       {label:"🧅 Rich & Comforting", value:"rich, comforting, creamy"},
     ]
   };
-
   const OCCASIONS = [
-    {label:"⚡ Quick Weeknight", value:"quick weeknight dinner (under 30 min)"},
+    {label:"⚡ Quick Weeknight", value:"quick weeknight (under 30 min)"},
     {label:"🏆 Impress Guests", value:"impressive dinner party dish"},
-    {label:"🌅 Weekend Project", value:"weekend project, worth the time and effort"},
-    {label:"📦 Meal Prep", value:"meal prep, makes good leftovers"},
+    {label:"🌅 Weekend Project", value:"weekend project, worth the effort"},
+    {label:"📦 Meal Prep", value:"meal prep, makes great leftovers"},
     {label:"❤️ Date Night", value:"romantic date night dinner"},
     {label:"👨‍👩‍👧 Family Dinner", value:"family dinner, crowd pleasing"},
-    {label:"🎉 Game Day", value:"game day food, finger food or hearty"},
+    {label:"🎉 Game Day", value:"game day food, hearty or finger food"},
     {label:"🥗 Light & Healthy", value:"light and healthy"},
   ];
 
-  function getFlavors() {
-    const cooker = selections.cooker;
-    return FLAVORS_BY_COOKER[cooker] || FLAVORS_BY_COOKER.default;
-  }
+  function getFlavors() { return FLAVORS_BY_COOKER[selections.cooker]||FLAVORS_BY_COOKER.default; }
+  function sel(k,v) { setSelections(s=>({...s,[k]:v})); }
+  function toggleFlavor(v) { setSelections(s=>({...s,flavor:s.flavor.includes(v)?s.flavor.filter(f=>f!==v):[...s.flavor,v].slice(0,3)})); }
 
-  function sel(key, value) {
-    setSelections(s => ({...s, [key]: value}));
-  }
-  function toggleFlavor(value) {
-    setSelections(s => ({
-      ...s,
-      flavor: s.flavor.includes(value) ? s.flavor.filter(f=>f!==value) : [...s.flavor, value].slice(0,3)
-    }));
-  }
-
-  function buildPrompt() {
+  function getContext() {
     const cookerObj = COOKERS.find(c=>c.value===selections.cooker);
     const cookerNotes = cookerObj?.notes ? ` (${cookerObj.notes})` : "";
-    const flavors = selections.flavor.join(", ");
-    const existing = savedTitles ? `My existing recipes: ${savedTitles}. Please suggest something different.` : "";
-
-    return `You are an expert culinary assistant helping me find a new recipe.
-
-${existing}
-
-Here is exactly what I am looking for:
-- Main ingredient: ${selections.protein}
-- Cooking method: ${selections.cooker}${cookerNotes}
-- Flavor profile: ${flavors||"your best recommendation"}
-- Occasion: ${selections.occasion}
-- Servings: ${selections.servings}
-${selections.notes ? `- Additional notes: ${selections.notes}` : ""}
-
-Please create a recipe perfectly suited to this. Reply with ONLY a valid JSON object, no markdown, no text before or after. Fields required: title, cuisine, categories (array), servings (number), prepTime (number in minutes), cookTime (number in minutes), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts like "2 tbsp butter"), steps (array of strings).
-Categories pick from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
-Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat`;
+    return {
+      protein: selections.protein,
+      cooker: selections.cooker + cookerNotes,
+      flavors: selections.flavor.join(", ") || "chef's choice",
+      occasion: selections.occasion,
+      servings: selections.servings,
+      notes: selections.notes,
+      existing: savedTitles ? `My existing recipes: ${savedTitles}. Suggest something different.` : "",
+    };
   }
 
-  async function copyPrompt() {
-    const prompt = buildPrompt();
-    try { await navigator.clipboard.writeText(prompt); }
+  // Prompt 1: Generate 5 ideas
+  function buildIdeasPrompt(batch) {
+    const c = getContext();
+    const batchNote = batch > 1 ? `\nI already saw ${(batch-1)*5} suggestions and didn't like them. Give me ${batch*5-((batch-1)*5)} completely different ideas.` : "";
+    return `You are an expert culinary assistant.
+${c.existing}
+I am looking for recipe ideas with these criteria:
+- Main ingredient: ${c.protein}
+- Cooking method: ${c.cooker}
+- Flavor profile: ${c.flavors}
+- Occasion: ${c.occasion}
+- Servings: ${c.servings}
+${c.notes ? `- Extra notes: ${c.notes}` : ""}${batchNote}
+
+Give me exactly 5 different recipe ideas. Reply with ONLY a JSON array, no markdown, no text before or after:
+[
+  {"title":"Recipe Name","description":"2-3 sentence description of what makes it special and how it's cooked"},
+  ...
+]`;
+  }
+
+  // Prompt 2: Full recipe for chosen idea
+  function buildRecipePrompt(idea) {
+    const c = getContext();
+    return `You are an expert culinary assistant.
+Create the full recipe for: "${idea.title}"
+Description: ${idea.description}
+Cooking method: ${c.cooker}
+Servings: ${c.servings}
+${c.notes ? `Notes: ${c.notes}` : ""}
+
+Reply with ONLY a valid JSON object, no markdown, no text before or after. Required fields: title, cuisine, categories (array), servings (number), prepTime (number in minutes), cookTime (number in minutes), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts like "2 tbsp butter"), steps (array of strings).
+Categories from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
+Diets from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat`;
+  }
+
+  async function doCopy(text, key) {
+    try { await navigator.clipboard.writeText(text); }
     catch {
       const ta = document.createElement("textarea");
-      ta.value = prompt; ta.style.cssText = "position:fixed;opacity:0";
+      ta.value=text; ta.style.cssText="position:fixed;opacity:0";
       document.body.appendChild(ta); ta.focus(); ta.select();
       document.execCommand("copy"); document.body.removeChild(ta);
     }
-    setCopied(true); setTimeout(()=>setCopied(false), 2500);
+    setCopied(key); setTimeout(()=>setCopied(""),2500);
   }
 
-  function openClaude() {
-    window.open("https://claude.ai/new?q=" + encodeURIComponent(buildPrompt()), "_blank");
-  }
-
-  function parseAndPreview() {
-    setError(""); setResult(null);
+  function parseIdeas() {
+    setIdeasError(""); setIdeas([]);
     try {
-      const clean = pasteText.replace(/```json|```/g,"").trim();
+      const clean = ideasPasteText.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+      if(!Array.isArray(parsed)||!parsed.length) throw new Error();
+      setIdeas(parsed);
+    } catch { setIdeasError("Could not parse. Make sure you copied the full JSON array from Claude."); }
+  }
+
+  function parseRecipe() {
+    setRecipeError(""); setResult(null);
+    try {
+      const clean = recipePasteText.replace(/```json|```/g,"").trim();
       const parsed = JSON.parse(clean);
       if(!parsed.title||!parsed.steps?.length) throw new Error();
-      setResult({...parsed, id:uid(), aiGenerated:true, photo:null,
-        categories:parsed.categories||[], diets:parsed.diets||[], tags:parsed.tags||[]});
-    } catch {
-      setError("Could not parse. Make sure you copied the full JSON from Claude.");
-    }
+      setResult({...parsed,id:uid(),aiGenerated:true,photo:null,
+        categories:parsed.categories||[],diets:parsed.diets||[],tags:parsed.tags||[]});
+    } catch { setRecipeError("Could not parse. Make sure you copied the full JSON from Claude."); }
   }
 
   function saveResult() {
     if(!result) return;
     onAddRecipe(result);
-    setSavedList(s=>[...s, result.title]);
-    setResult(null); setPasteText("");
+    setSavedList(s=>[...s,result.title]);
+    setResult(null); setRecipePasteText("");
   }
 
   function resetWizard() {
-    setStep(0);
+    setStage(STAGES.SETUP);
     setSelections({protein:"",cooker:prefs.defaultCooker||"",flavor:[],occasion:"",notes:"",servings:"4"});
-    setPasteText(""); setResult(null); setError("");
+    setIdeas([]); setIdeaBatch(1); setChosenIdea(null);
+    setIdeasPasteText(""); setRecipePasteText(""); setResult(null);
+    setIdeasError(""); setRecipeError("");
   }
 
-  // Wizard step config
-  const canAdvance = [
-    true,
-    !!selections.protein,
-    !!selections.cooker,
-    selections.flavor.length > 0,
-    !!selections.occasion,
-    true,
-  ];
-
-  // ── Styles ────────────────────────────────────────────────────────────────
+  // ── Shared styles ─────────────────────────────────────────────────────────
   const chipStyle = (active) => ({
-    padding:'10px 14px', borderRadius:6, border: active ? '2px solid var(--saffron)' : '2px solid var(--parchment-dark)',
+    padding:'10px 14px', borderRadius:6,
+    border: active ? '2px solid var(--saffron)' : '2px solid var(--parchment-dark)',
     background: active ? 'rgba(212,137,26,0.12)' : 'var(--cream)',
-    cursor:'pointer', fontSize:14, fontWeight: active ? 700 : 400,
+    cursor:'pointer', fontSize:14, fontWeight: active?700:400,
     color: active ? 'var(--saffron)' : 'var(--ink)', transition:'all 0.15s',
     display:'flex', alignItems:'center', gap:6, userSelect:'none',
     WebkitTapHighlightColor:'transparent',
   });
-
-  const chipGrid = {display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:10, marginBottom:20};
-
-  const stepTitle = (num, title) => (
+  const chipGrid = {display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:10,marginBottom:20};
+  const stepTitle = (num,title) => (
     <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
       <div style={{width:28,height:28,borderRadius:'50%',background:'var(--saffron)',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Special Elite',monospace",fontSize:13,flexShrink:0}}>{num}</div>
       <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>{title}</div>
     </div>
   );
+  const backBtn = (to) => <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStage(to)}>← Back</button>;
 
-  // ── RENDER ────────────────────────────────────────────────────────────────
-
-  // Step 0 — Intro / Equipment setup
-  if(step === 0) return (
+  // ── SETUP ─────────────────────────────────────────────────────────────────
+  if(stage===STAGES.SETUP) return (
     <div>
       <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>✨ Recipe Builder</div>
-      <p className="text-muted" style={{marginBottom:24}}>Answer a few quick questions and we'll build the perfect recipe prompt for you.</p>
-
+      <p className="text-muted" style={{marginBottom:20}}>Answer a few questions — we'll suggest 5 recipe ideas, you pick one, we build the full recipe.</p>
       <div className="ai-panel" style={{marginBottom:16}}>
         <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:12}}>Your Equipment</div>
-        <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:14,lineHeight:1.6}}>Tell us what you cook on so we can remember it and tailor every recipe suggestion to your setup.</p>
         <div style={chipGrid}>
           {COOKERS.map(c=>(
             <div key={c.value} style={chipStyle((prefs.equipment||[]).includes(c.value))} onClick={()=>{
-              const eq = prefs.equipment||[];
-              const updated = eq.includes(c.value) ? eq.filter(x=>x!==c.value) : [...eq,c.value];
-              savePrefs({...prefs, equipment:updated});
+              const eq=prefs.equipment||[];
+              savePrefs({...prefs,equipment:eq.includes(c.value)?eq.filter(x=>x!==c.value):[...eq,c.value]});
             }}>
-              {c.label} {(prefs.equipment||[]).includes(c.value) && <span style={{marginLeft:'auto',fontSize:12}}>✓</span>}
+              {c.label}{(prefs.equipment||[]).includes(c.value)&&<span style={{marginLeft:'auto',fontSize:12}}>✓</span>}
             </div>
           ))}
         </div>
-        {(prefs.equipment||[]).length > 0 && (
+        {(prefs.equipment||[]).length>0&&(
           <div style={{marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--ink-mid)',marginBottom:8}}>Default cooker</div>
             <select className="filter-select" style={{width:'100%'}} value={prefs.defaultCooker||""} onChange={e=>savePrefs({...prefs,defaultCooker:e.target.value})}>
               <option value="">Ask me each time</option>
-              {(prefs.equipment||[]).map(eq=>{
-                const c = COOKERS.find(x=>x.value===eq);
-                return <option key={eq} value={eq}>{c?.label||eq}</option>;
-              })}
+              {(prefs.equipment||[]).map(eq=>{const c=COOKERS.find(x=>x.value===eq);return <option key={eq} value={eq}>{c?.label||eq}</option>;})}
             </select>
           </div>
         )}
-        <button className="btn btn-primary" onClick={()=>{ setSelections(s=>({...s,cooker:prefs.defaultCooker||""})); setStep(1); }}>
-          Start Building a Recipe →
+        <button className="btn btn-primary" onClick={()=>{setSelections(s=>({...s,cooker:prefs.defaultCooker||""}));setStage(STAGES.PROTEIN);}}>
+          Start Building →
         </button>
       </div>
-
-      {savedList.length>0&&(
-        <div className="ai-panel">
-          <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--sage)',marginBottom:8}}>✓ Saved this session</div>
-          {savedList.map((t,i)=><div key={i} style={{fontSize:13,color:'var(--ink-mid)',padding:'2px 0'}}>{t}</div>)}
-        </div>
-      )}
+      {savedList.length>0&&<div className="ai-panel"><div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--sage)',marginBottom:8}}>✓ Saved this session</div>{savedList.map((t,i)=><div key={i} style={{fontSize:13,color:'var(--ink-mid)',padding:'2px 0'}}>{t}</div>)}</div>}
     </div>
   );
 
-  // Step 1 — Protein
-  if(step === 1) return (
+  // ── PROTEIN ───────────────────────────────────────────────────────────────
+  if(stage===STAGES.PROTEIN) return (
     <div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(0)}>← Back</button>
+      {backBtn(STAGES.SETUP)}
       <div className="ai-panel">
-        {stepTitle(1, "What's your main ingredient?")}
-        <div style={chipGrid}>
-          {PROTEINS.map(p=>(
-            <div key={p.value} style={chipStyle(selections.protein===p.value)} onClick={()=>sel("protein",p.value)}>
-              {p.label}
-            </div>
-          ))}
-        </div>
-        <button className="btn btn-primary" disabled={!canAdvance[1]} onClick={()=>setStep(prefs.defaultCooker ? 3 : 2)}>
-          Next →
-        </button>
+        {stepTitle(1,"What's your main ingredient?")}
+        <div style={chipGrid}>{PROTEINS.map(p=><div key={p.value} style={chipStyle(selections.protein===p.value)} onClick={()=>sel("protein",p.value)}>{p.label}</div>)}</div>
+        <button className="btn btn-primary" disabled={!selections.protein} onClick={()=>setStage(prefs.defaultCooker?STAGES.FLAVOR:STAGES.COOKER)}>Next →</button>
       </div>
     </div>
   );
 
-  // Step 2 — Cooker
-  if(step === 2) return (
+  // ── COOKER ────────────────────────────────────────────────────────────────
+  if(stage===STAGES.COOKER) return (
     <div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(1)}>← Back</button>
+      {backBtn(STAGES.PROTEIN)}
       <div className="ai-panel">
-        {stepTitle(2, "How are you cooking it?")}
-        <div style={chipGrid}>
-          {COOKERS.map(c=>(
-            <div key={c.value} style={chipStyle(selections.cooker===c.value)} onClick={()=>{ sel("cooker",c.value); sel("flavor",[]); }}>
-              {c.label}
-            </div>
-          ))}
-        </div>
-        <button className="btn btn-primary" disabled={!canAdvance[2]} onClick={()=>setStep(3)}>Next →</button>
+        {stepTitle(2,"How are you cooking it?")}
+        <div style={chipGrid}>{COOKERS.map(c=><div key={c.value} style={chipStyle(selections.cooker===c.value)} onClick={()=>{sel("cooker",c.value);sel("flavor",[]);}}>{c.label}</div>)}</div>
+        <button className="btn btn-primary" disabled={!selections.cooker} onClick={()=>setStage(STAGES.FLAVOR)}>Next →</button>
       </div>
     </div>
   );
 
-  // Step 3 — Flavor
-  if(step === 3) return (
+  // ── FLAVOR ────────────────────────────────────────────────────────────────
+  if(stage===STAGES.FLAVOR) return (
     <div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(prefs.defaultCooker ? 1 : 2)}>← Back</button>
+      {backBtn(prefs.defaultCooker?STAGES.PROTEIN:STAGES.COOKER)}
       <div className="ai-panel">
-        {stepTitle(3, "What flavor profile?")}
-        <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:14}}>Pick up to 3. {selections.cooker && <span style={{color:'var(--saffron)',fontWeight:700}}>Tailored for your {COOKERS.find(c=>c.value===selections.cooker)?.label}</span>}</p>
-        <div style={chipGrid}>
-          {getFlavors().map(f=>(
-            <div key={f.value} style={chipStyle(selections.flavor.includes(f.value))} onClick={()=>toggleFlavor(f.value)}>
-              {f.label} {selections.flavor.includes(f.value) && <span style={{marginLeft:'auto',fontSize:11,color:'var(--saffron)'}}>✓</span>}
-            </div>
-          ))}
-        </div>
-        <button className="btn btn-primary" disabled={!canAdvance[3]} onClick={()=>setStep(4)}>Next →</button>
+        {stepTitle(3,"What flavor profile?")}
+        <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:14}}>Pick up to 3.{selections.cooker&&<span style={{color:'var(--saffron)',fontWeight:700}}> Tailored for your {COOKERS.find(c=>c.value===selections.cooker)?.label}</span>}</p>
+        <div style={chipGrid}>{getFlavors().map(f=><div key={f.value} style={chipStyle(selections.flavor.includes(f.value))} onClick={()=>toggleFlavor(f.value)}>{f.label}{selections.flavor.includes(f.value)&&<span style={{marginLeft:'auto',fontSize:11}}>✓</span>}</div>)}</div>
+        <button className="btn btn-primary" disabled={!selections.flavor.length} onClick={()=>setStage(STAGES.OCCASION)}>Next →</button>
       </div>
     </div>
   );
 
-  // Step 4 — Occasion
-  if(step === 4) return (
+  // ── OCCASION ──────────────────────────────────────────────────────────────
+  if(stage===STAGES.OCCASION) return (
     <div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(3)}>← Back</button>
+      {backBtn(STAGES.FLAVOR)}
       <div className="ai-panel">
-        {stepTitle(4, "What's the occasion?")}
-        <div style={chipGrid}>
-          {OCCASIONS.map(o=>(
-            <div key={o.value} style={chipStyle(selections.occasion===o.value)} onClick={()=>sel("occasion",o.value)}>
-              {o.label}
-            </div>
-          ))}
-        </div>
-        <button className="btn btn-primary" disabled={!canAdvance[4]} onClick={()=>setStep(5)}>Next →</button>
+        {stepTitle(4,"What's the occasion?")}
+        <div style={chipGrid}>{OCCASIONS.map(o=><div key={o.value} style={chipStyle(selections.occasion===o.value)} onClick={()=>sel("occasion",o.value)}>{o.label}</div>)}</div>
+        <button className="btn btn-primary" disabled={!selections.occasion} onClick={()=>setStage(STAGES.DETAILS)}>Next →</button>
       </div>
     </div>
   );
 
-  // Step 5 — Details
-  if(step === 5) return (
+  // ── DETAILS ───────────────────────────────────────────────────────────────
+  if(stage===STAGES.DETAILS) return (
     <div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(4)}>← Back</button>
+      {backBtn(STAGES.OCCASION)}
       <div className="ai-panel">
-        {stepTitle(5, "Any final details?")}
+        {stepTitle(5,"Any final details?")}
         <div className="form-group">
           <label className="form-label">Servings</label>
           <select className="form-input" style={{width:'auto'}} value={selections.servings} onChange={e=>sel("servings",e.target.value)}>
@@ -1128,57 +1100,119 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
         </div>
         <div className="form-group">
           <label className="form-label">Extra notes (optional)</label>
-          <textarea className="form-input form-textarea" style={{minHeight:80}} placeholder="e.g. wife doesn't like cilantro, I have mushrooms to use up, keep it under 500 calories..." value={selections.notes} onChange={e=>sel("notes",e.target.value)} />
+          <textarea className="form-input form-textarea" style={{minHeight:80}} placeholder="e.g. wife doesn't like cilantro, I have mushrooms to use up..." value={selections.notes} onChange={e=>sel("notes",e.target.value)} />
         </div>
-        <button className="btn btn-primary" onClick={()=>setStep(6)}>Build My Prompt →</button>
+        <button className="btn btn-primary" onClick={()=>{setIdeaBatch(1);setIdeas([]);setIdeasPasteText("");setStage(STAGES.IDEAS);}}>Get Recipe Ideas →</button>
       </div>
     </div>
   );
 
-  // Step 6 — Prompt ready + paste result
-  if(step === 6) return (
+  // ── IDEAS ─────────────────────────────────────────────────────────────────
+  if(stage===STAGES.IDEAS) return (
     <div>
-      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>setStep(5)}>← Back</button>
+      {backBtn(STAGES.DETAILS)}
 
-      {/* Summary */}
+      {/* Step A: Get ideas from Claude */}
       <div className="ai-panel" style={{marginBottom:16}}>
-        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:12}}>Your Recipe Request</div>
-        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:16}}>
-          {[
-            {label:"🥩 "+selections.protein, show:!!selections.protein},
-            {label:"🍳 "+COOKERS.find(c=>c.value===selections.cooker)?.label, show:!!selections.cooker},
-            ...selections.flavor.map(f=>({label:f.split(",")[0], show:true})),
-            {label:OCCASIONS.find(o=>o.value===selections.occasion)?.label, show:!!selections.occasion},
-            {label:"👤 "+selections.servings, show:true},
-          ].filter(x=>x.show&&x.label).map((x,i)=>(
-            <span key={i} style={{background:'var(--parchment-dark)',padding:'4px 12px',borderRadius:20,fontSize:13,fontWeight:600}}>{x.label}</span>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:8}}>
+          Step A — Get 5 recipe ideas{ideaBatch>1?` (batch ${ideaBatch})`:""}
+        </div>
+        {/* Summary chips */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14}}>
+          {[selections.protein,COOKERS.find(c=>c.value===selections.cooker)?.label,...selections.flavor.map(f=>f.split(",")[0]),OCCASIONS.find(o=>o.value===selections.occasion)?.label,"👤 "+selections.servings].filter(Boolean).map((x,i)=>(
+            <span key={i} style={{background:'var(--parchment-dark)',padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:600}}>{x}</span>
           ))}
         </div>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-          <button className="btn btn-primary" onClick={openClaude}>Open Claude ↗</button>
-          <button className="btn btn-outline btn-sm" onClick={copyPrompt}>{copied?"✓ Copied!":"📋 Copy prompt"}</button>
-          <button className="btn btn-ghost btn-sm" onClick={resetWizard}>Start Over</button>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:10}}>
+          <button className="btn btn-primary" onClick={()=>window.open("https://claude.ai/new?q="+encodeURIComponent(buildIdeasPrompt(ideaBatch)),"_blank")}>
+            Open Claude for ideas ↗
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={()=>doCopy(buildIdeasPrompt(ideaBatch),"ideas")}>
+            {copied==="ideas"?"✓ Copied!":"📋 Copy prompt"}
+          </button>
         </div>
-        <p style={{fontSize:12,color:'var(--ink-light)',marginTop:10,lineHeight:1.6}}>
-          Tap <strong>Open Claude</strong> — your full request opens pre-filled. Hit send, copy the JSON response, and paste it below.
+        <p style={{fontSize:12,color:'var(--ink-light)',marginBottom:14,lineHeight:1.6}}>
+          Claude will give you 5 ideas as a JSON list. Copy the whole response and paste below.
+        </p>
+        <textarea
+          className="ai-input"
+          style={{width:'100%',minHeight:100,resize:'vertical',marginBottom:10,padding:12,fontSize:13,fontFamily:'monospace',borderRadius:3,display:'block'}}
+          placeholder="Paste Claude's JSON array here..."
+          value={ideasPasteText}
+          onChange={e=>{setIdeasPasteText(e.target.value);setIdeasError("");setIdeas([]);}}
+        />
+        <button className="btn btn-primary" onClick={parseIdeas} disabled={!ideasPasteText.trim()}>Show Ideas</button>
+        {ideasError&&<div style={{marginTop:10,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {ideasError}</div>}
+      </div>
+
+      {/* Ideas list */}
+      {ideas.length>0&&(
+        <div className="ai-panel">
+          <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:14}}>
+            Step B — Pick one
+          </div>
+          {ideas.map((idea,i)=>(
+            <div key={i} style={{background:'var(--cream)',border:'2px solid var(--parchment-dark)',borderRadius:6,padding:16,marginBottom:10,cursor:'pointer',transition:'all 0.15s'}}
+              onClick={()=>{setChosenIdea(idea);setRecipePasteText("");setResult(null);setRecipeError("");setStage(STAGES.RECIPE);}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor='var(--saffron)'}
+              onMouseLeave={e=>e.currentTarget.style.borderColor='var(--parchment-dark)'}
+            >
+              <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
+                <div style={{width:28,height:28,borderRadius:'50%',background:'var(--saffron)',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Special Elite',monospace",fontSize:14,flexShrink:0,marginTop:2}}>{i+1}</div>
+                <div>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:4}}>{idea.title}</div>
+                  <div style={{fontSize:13,color:'var(--ink-light)',lineHeight:1.6}}>{idea.description}</div>
+                </div>
+              </div>
+              <div style={{marginTop:10,fontSize:12,color:'var(--saffron)',fontWeight:700,textAlign:'right'}}>Tap to build this recipe →</div>
+            </div>
+          ))}
+          <div style={{marginTop:8,paddingTop:16,borderTop:'1px solid var(--parchment-dark)',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <span style={{fontSize:13,color:'var(--ink-light)'}}>None of these?</span>
+            <button className="btn btn-outline btn-sm" onClick={()=>{setIdeaBatch(b=>b+1);setIdeas([]);setIdeasPasteText("");}}>
+              Show me 5 more →
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── FULL RECIPE ───────────────────────────────────────────────────────────
+  if(stage===STAGES.RECIPE) return (
+    <div>
+      <button className="btn btn-ghost btn-sm" style={{marginBottom:16}} onClick={()=>{setStage(STAGES.IDEAS);setResult(null);}}>← Back to ideas</button>
+
+      <div className="ai-panel" style={{marginBottom:16}}>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:8}}>Building Full Recipe</div>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,marginBottom:4}}>{chosenIdea?.title}</div>
+        <div style={{fontSize:13,color:'var(--ink-light)',marginBottom:16,lineHeight:1.6}}>{chosenIdea?.description}</div>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:10}}>
+          <button className="btn btn-primary" onClick={()=>window.open("https://claude.ai/new?q="+encodeURIComponent(buildRecipePrompt(chosenIdea)),"_blank")}>
+            Open Claude for full recipe ↗
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={()=>doCopy(buildRecipePrompt(chosenIdea),"recipe")}>
+            {copied==="recipe"?"✓ Copied!":"📋 Copy prompt"}
+          </button>
+        </div>
+        <p style={{fontSize:12,color:'var(--ink-light)',lineHeight:1.6}}>
+          Claude will return the full recipe as JSON. Copy the whole response and paste below.
         </p>
       </div>
 
-      {/* Paste result */}
       <div className="ai-panel">
-        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Paste Claude's Response</div>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Paste Full Recipe JSON</div>
         <textarea
           className="ai-input"
           style={{width:'100%',minHeight:120,resize:'vertical',marginBottom:10,padding:12,fontSize:13,fontFamily:'monospace',borderRadius:3,display:'block'}}
           placeholder="Paste the full JSON from Claude here..."
-          value={pasteText}
-          onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}}
+          value={recipePasteText}
+          onChange={e=>{setRecipePasteText(e.target.value);setRecipeError("");setResult(null);}}
         />
-        <button className="btn btn-primary" onClick={parseAndPreview} disabled={!pasteText.trim()}>Parse & Preview</button>
+        <button className="btn btn-primary" onClick={parseRecipe} disabled={!recipePasteText.trim()}>Parse & Preview</button>
+        {recipeError&&<div style={{marginTop:10,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {recipeError}</div>}
 
-        {error && <div style={{marginTop:12,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {error}</div>}
-
-        {result && (
+        {result&&(
           <div style={{marginTop:16,background:'var(--parchment-dark)',borderRadius:4,padding:18}}>
             <div style={{fontFamily:"'Special Elite',monospace",fontSize:11,textTransform:'uppercase',letterSpacing:2,color:'var(--ink-light)',marginBottom:6}}>Preview</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,marginBottom:4}}>{result.title}</div>
@@ -1190,17 +1224,11 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
             </div>
             {(result.categories||[]).length>0&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>{result.categories.map(c=><span key={c} style={{background:'var(--saffron)',color:'white',padding:'2px 8px',borderRadius:2,fontSize:11,fontWeight:700}}>{c}</span>)}</div>}
             {(result.diets||[]).length>0&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>{result.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
-            <div style={{display:'flex',gap:8}}>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
               <button className="btn btn-primary btn-sm" onClick={saveResult}>✓ Save to Library</button>
-              <button className="btn btn-ghost btn-sm" onClick={()=>setResult(null)}>Discard</button>
+              <button className="btn btn-ghost btn-sm" onClick={resetWizard}>Build Another</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>{setStage(STAGES.IDEAS);setResult(null);}}>Try a Different Idea</button>
             </div>
-          </div>
-        )}
-
-        {savedList.length>0&&(
-          <div style={{marginTop:16,borderTop:'1px solid var(--parchment-dark)',paddingTop:12}}>
-            <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--sage)',marginBottom:6}}>✓ Saved this session</div>
-            {savedList.map((t,i)=><div key={i} style={{fontSize:13,color:'var(--ink-mid)',padding:'2px 0'}}>{t}</div>)}
           </div>
         )}
       </div>
