@@ -931,17 +931,20 @@ Reply with the NUMBER of the recipe you want the full recipe for, or say "5 more
   // Prompt 2: Full recipe for chosen idea
   function buildRecipePrompt(idea) {
     const c = getContext();
-    return `Please give me the full recipe for "${idea.title}".
+    return `I need to import a recipe into my recipe app. The app only accepts raw JSON text — it cannot read formatted recipes, cards, or anything visual.
 
+Recipe to create: "${idea.title}"
 Cooking on: ${c.cooker}
 Servings: ${c.servings}
 ${c.notes ? `Notes: ${c.notes}` : ""}
 
-Return the recipe as a JSON object only — no explanation before or after, just the raw JSON starting with { and ending with }.
+YOUR RESPONSE MUST BE ONLY RAW JSON TEXT. Do not use any formatting, do not create a recipe card, do not use headers or bullets. Just type the JSON starting with { and ending with }. I will copy and paste your raw text response into my app.
 
-The JSON must have these fields: title (string), cuisine (string), categories (array of strings), servings (number), prepTime (number), cookTime (number), description (string), tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts e.g. "2 tbsp butter"), steps (array of strings).
+Required JSON fields: title (string), cuisine (string), categories (array), servings (number), prepTime (number), cookTime (number), description (string), tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts e.g. "2 tbsp butter"), steps (array of strings).
 Categories from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
-Diets from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat`;
+Diets from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat
+
+Start your response with { and end with }. No other text.`;
   }
 
   async function doCopy(text, key) {
