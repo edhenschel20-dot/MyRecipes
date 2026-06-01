@@ -557,31 +557,29 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
 
 // ── Recipe Detail ──────────────────────────────────────────────────────────
 function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite}) {
-  // Sanitize recipe data to prevent crashes from malformed imports
   const safe = {
     ...recipe,
-    title: safe.title || "Untitled",
-    servings: Number(safe.servings) || 4,
-    prepTime: Number(safe.prepTime) || 0,
-    cookTime: Number(safe.cookTime) || 0,
-    calories: safe.calories ? Number(safe.calories) : null,
-    protein: safe.protein ? Number(safe.protein) : null,
-    carbs: safe.carbs ? Number(safe.carbs) : null,
-    fat: safe.fat ? Number(safe.fat) : null,
-    fiber: safe.fiber ? Number(safe.fiber) : null,
-    sugar: safe.sugar ? Number(safe.sugar) : null,
-    sodium: safe.sodium ? Number(safe.sodium) : null,
-    ingredients: Array.isArray(safe.ingredients) ? safe.ingredients : [],
-    steps: Array.isArray(safe.steps) ? safe.steps.map(s=>typeof s==="string"?s:JSON.stringify(s)) : [],
-    tags: Array.isArray(safe.tags) ? safe.tags : [],
-    diets: Array.isArray(safe.diets) ? safe.diets : [],
-    categories: Array.isArray(safe.categories) ? safe.categories : [],
-    description: typeof safe.description === "string" ? safe.description : "",
-    cuisine: typeof safe.cuisine === "string" ? safe.cuisine : "",
-    photo: safe.photo || null,
-    favorite: !!safe.favorite,
+    title: recipe.title || "Untitled",
+    servings: Number(recipe.servings) || 4,
+    prepTime: Number(recipe.prepTime) || 0,
+    cookTime: Number(recipe.cookTime) || 0,
+    calories: recipe.calories ? Number(recipe.calories) : null,
+    protein: recipe.protein ? Number(recipe.protein) : null,
+    carbs: recipe.carbs ? Number(recipe.carbs) : null,
+    fat: recipe.fat ? Number(recipe.fat) : null,
+    fiber: recipe.fiber ? Number(recipe.fiber) : null,
+    sugar: recipe.sugar ? Number(recipe.sugar) : null,
+    sodium: recipe.sodium ? Number(recipe.sodium) : null,
+    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
+    steps: Array.isArray(recipe.steps) ? recipe.steps.map(s=>typeof s==="string"?s:JSON.stringify(s)) : [],
+    tags: Array.isArray(recipe.tags) ? recipe.tags : [],
+    diets: Array.isArray(recipe.diets) ? recipe.diets : [],
+    categories: Array.isArray(recipe.categories) ? recipe.categories : [],
+    description: typeof recipe.description === "string" ? recipe.description : "",
+    cuisine: typeof recipe.cuisine === "string" ? recipe.cuisine : "",
+    photo: recipe.photo || null,
+    favorite: !!recipe.favorite,
   };
-  const recipe2 = safe;
   const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
   const scale = servings / base;
@@ -591,37 +589,37 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
     <div>
       <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Library</button></div>
       <div className="detail-panel">
-        {/* Hero photo */}
         <div className="detail-hero">
           {safe.photo
             ? <img src={safe.photo} alt={safe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in"}} onClick={()=>onLightbox(safe.photo)} />
-            : <div className="detail-hero-placeholder">{recipeEmoji(recipe)}</div>
+            : <div className="detail-hero-placeholder">{recipeEmoji(safe)}</div>
           }
           <div className="detail-hero-overlay" />
           <div className="detail-hero-actions">
-            <button className="detail-hero-btn detail-hero-btn-primary" onClick={()=>onCook(recipe)}>▶ Cook</button>
-            <button className="detail-hero-btn detail-hero-btn-light" onClick={()=>onEdit(recipe)}>Edit</button>
+            <button className="detail-hero-btn detail-hero-btn-primary" onClick={()=>onCook(safe)}>▶ Cook</button>
+            <button className="detail-hero-btn detail-hero-btn-light" onClick={()=>onEdit(safe)}>Edit</button>
             <button className="detail-hero-btn detail-hero-btn-danger" onClick={()=>onDelete(safe.id)}>Delete</button>
           </div>
         </div>
 
         <div className="detail-content">
-          <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-          <div className="detail-title" style={{marginBottom:0}}>{safe.title}</div>
-          <button className="fav-btn" style={{fontSize:28}} onClick={()=>onToggleFavorite(safe.id)} title={safe.favorite?"Remove from favorites":"Add to favorites"}>{safe.favorite?"❤️":"🤍"}</button>
-        </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div className="detail-title" style={{marginBottom:0}}>{safe.title}</div>
+            <button className="fav-btn" style={{fontSize:28}} onClick={()=>onToggleFavorite(safe.id)} title={safe.favorite?"Remove from favorites":"Add to favorites"}>{safe.favorite?"❤️":"🤍"}</button>
+          </div>
           <div className="detail-meta">
+            {(safe.categories||[]).map(c=><span key={c} style={{background:"var(--saffron)",color:"white",padding:"2px 10px",borderRadius:3,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",marginRight:4}}>{c}</span>)}
             {safe.cuisine && <span>🌍 {safe.cuisine}</span>}
             {safe.prepTime!=null && <span>⏱ Prep: {safe.prepTime} min</span>}
             {safe.cookTime!=null && <span>🔥 Cook: {safe.cookTime} min</span>}
           </div>
           {(safe.diets||[]).length>0 && <div className="diet-badges">{safe.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
-          {safe.description && <p style={{fontSize:15,color:'var(--ink-mid)',lineHeight:1.6,marginTop:12}}>{safe.description}</p>}
+          {safe.description && <p style={{fontSize:15,color:"var(--ink-mid)",lineHeight:1.6,marginTop:12}}>{safe.description}</p>}
           <div className="recipe-card-tags" style={{marginTop:12}}>{(safe.tags||[]).map(t=><span key={t} className="tag">{t}</span>)}</div>
 
           {hasNutrition && (
             <>
-              <div className="detail-section-title">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:'none',letterSpacing:0}}>per serving</span></div>
+              <div className="detail-section-title">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:"none",letterSpacing:0}}>per serving</span></div>
               <div className="nutrition-grid">
                 {safe.calories && <div className="nutrition-card"><div className="nutrition-value">{safe.calories}</div><div className="nutrition-unit">kcal</div><div className="nutrition-label">Calories</div></div>}
                 {safe.protein && <div className="nutrition-card"><div className="nutrition-value">{safe.protein}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Protein</div></div>}
@@ -641,17 +639,17 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
             <span className="scaler-value">{servings}</span>
             <button className="scaler-btn" onClick={()=>setServings(s=>s+1)}>+</button>
             {scale!==1 && <span className="scaler-original">(recipe makes {base})</span>}
-            {scale!==1 && safe.calories && <span style={{marginLeft:'auto',fontSize:13,color:'var(--saffron)',fontWeight:700}}>{Math.round(safe.calories * servings)} kcal total</span>}
+            {scale!==1 && safe.calories && <span style={{marginLeft:"auto",fontSize:13,color:"var(--saffron)",fontWeight:700}}>{Math.round(safe.calories * servings)} kcal total</span>}
           </div>
           <ul className="ingredient-list">
-            {(safe.ingredients||[]).map((ing,i)=>{
+            {safe.ingredients.map((ing,i)=>{
               const p = parseIngredient(ing);
               const hasAmt = p.amount !== null && scale !== 1;
               return (
                 <li key={i}>
                   {hasAmt
                     ? <><span className="ing-amount">{formatAmount(p.amount,scale,p.unitKey)} {p.unitDisplay}</span><span className="ing-name">{p.name}</span></>
-                    : <span className="ing-name" style={{flex:'unset'}}>{ing}</span>
+                    : <span className="ing-name" style={{flex:"unset"}}>{ing}</span>
                   }
                 </li>
               );
@@ -659,43 +657,11 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
           </ul>
 
           <div className="detail-section-title">Method</div>
-          <ol className="step-list">{(safe.steps||[]).map((step,i)=><li key={i}>{step}</li>)}</ol>
+          <ol className="step-list">{safe.steps.map((step,i)=><li key={i}>{step}</li>)}</ol>
         </div>
       </div>
     </div>
   );
-}
-
-// ── Ingredient matcher ────────────────────────────────────────────────────
-function extractKeywords(ing) {
-  let s = ing.replace(/^[\d\s/½⅓⅔¼¾⅛.]+/, "");
-  s = s.replace(/\b(tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|whole|large|medium|small|fresh|dried|finely|chopped|diced|minced|grated|sliced|boneless|skinless)\b/gi, "");
-  s = s.replace(/[,(].*/, ""); // drop parenthetical notes
-  return s.split(/\s+/).map(w=>w.toLowerCase().trim()).filter(w=>w.length>2);
-}
-
-function parseIngAmount(ing) {
-  // Return { amount: "2 tbsp", name: "Butter" }
-  const frac = {"½":"1/2","⅓":"1/3","⅔":"2/3","¼":"1/4","¾":"3/4","⅛":"1/8"};
-  let s = ing.trim();
-  Object.entries(frac).forEach(([k,v])=>{ s=s.replace(k,v); });
-  const units = "tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|pinches|whole|large|medium|small|cloves?|heads?|bunch|bunches|pieces?|slices?|strips?|cans?|jars?";
-  const re = new RegExp(`^([\d\s/.-]+(?:${units})?)\s*(.*)$`,"i");
-  const m = s.match(re);
-  if(m) return { amount: m[1].trim(), name: m[2].replace(/^[,\s]+/,"").trim() };
-  return { amount: "", name: ing };
-}
-
-function matchIngredients(stepText, ingredients) {
-  const stepLower = stepText.toLowerCase();
-  return (ingredients||[]).filter(ing => {
-    const keywords = extractKeywords(ing);
-    return keywords.some(kw => {
-      // Match whole word to avoid "egg" matching "eggplant" etc
-      const re = new RegExp(`\\b${kw}`, "i");
-      return re.test(stepLower);
-    });
-  });
 }
 
 // ── Cook Mode ──────────────────────────────────────────────────────────────
