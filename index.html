@@ -882,7 +882,7 @@ function parseStashcook(text) {
     if(cur.trim()) steps.push(cur.trim());
 
     if(!title || !ingredients.length || !steps.length) return null;
-    return {id:uid(),title,cuisine:"",category:"",servings,prepTime:0,cookTime,description:"",tags:["imported","stashcook"],diets:[],calories:null,protein:null,carbs:null,fat:null,fiber:null,photo:null,ingredients,steps};
+    return {id:uid(),title,cuisine:"",category:"",servings,prepTime:0,cookTime,description:"",tags:[],diets:[],calories:null,protein:null,carbs:null,fat:null,fiber:null,photo:null,ingredients,steps};
   } catch { return null; }
 }
 
@@ -905,7 +905,7 @@ function ImportTab({onImport}) {
       const data=await res.json();
       const parsed=JSON.parse(data.content?.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim());
       if(!parsed.title||!parsed.steps?.length) throw new Error();
-      setResult({...parsed,id:uid(),tags:[...(parsed.tags||[]),"imported"],photo:null});
+      setResult({...parsed,id:uid(),tags:(parsed.tags||[]),photo:null});
     } catch { setError("Couldn't parse. Try paste mode or check the URL is public."); }
     finally { setLoading(false); }
   }
