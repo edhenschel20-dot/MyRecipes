@@ -408,8 +408,15 @@ function RecipeBook() {
   useEffect(() => { saveData(data); }, [data]);
 
   function toggleFavorite(id) {
-    setData(d => ({ ...d, recipes: d.recipes.map(r => r.id===id ? {...r, favorite:!r.favorite} : r) }));
-    if (selectedRecipe?.id === id) setSelectedRecipe(r => ({...r, favorite:!r.favorite}));
+    setData(d => {
+      const updated = {...d, recipes: d.recipes.map(r => r.id===id ? {...r, favorite:!r.favorite} : r)};
+      // Keep selectedRecipe in sync
+      if (selectedRecipe?.id === id) {
+        const found = updated.recipes.find(r => r.id===id);
+        if (found) setSelectedRecipe(found);
+      }
+      return updated;
+    });
   }
 
   function upsertRecipe(r) {
