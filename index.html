@@ -233,6 +233,7 @@ const STYLES = `
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIET_OPTIONS = ["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Nut-Free","Low-Carb","Low-Fat","Halal","Kosher"];
+const CATEGORIES = ["Appetizer","Breakfast","Brunch","Lunch","Dinner","Dessert","Snack","Side Dish","Sauce","Topping","Dressing","Marinade","Soup","Salad","Bread","Drink","Other"];
 const COLORS = ["#d4891a","#b84a2e","#5a7a4a","#4a6a8a","#8a4a7a","#6a8a4a"];
 const FOOD_EMOJIS = { pasta:"🍝", chicken:"🍗", salad:"🥗", soup:"🍜", beef:"🥩", fish:"🐟", pizza:"🍕", default:"🍽" };
 
@@ -385,6 +386,7 @@ function RecipeBook() {
   const [filterCuisine, setFilterCuisine] = useState("");
   const [filterTag, setFilterTag] = useState("");
   const [filterDiet, setFilterDiet] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [showSync, setShowSync] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -406,12 +408,14 @@ function RecipeBook() {
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
   const allDiets = [...new Set(recipes.flatMap(r=>r.diets||[]))];
+  const allCategories = [...new Set(recipes.map(r=>r.category).filter(Boolean))];
   const filtered = recipes.filter(r => {
     const q = search.toLowerCase();
     return (!q || r.title.toLowerCase().includes(q) || (r.tags||[]).some(t=>t.includes(q)) || (r.cuisine||"").toLowerCase().includes(q))
       && (!filterCuisine || r.cuisine===filterCuisine)
       && (!filterTag || (r.tags||[]).includes(filterTag))
-      && (!filterDiet || (r.diets||[]).includes(filterDiet));
+      && (!filterDiet || (r.diets||[]).includes(filterDiet))
+      && (!filterCategory || r.category===filterCategory);
   });
 
   function startCookMode(recipe) {
@@ -444,7 +448,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={setLightbox} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={setLightbox} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
         {tab==="import" && <ImportTab onImport={r=>{upsertRecipe(r);}} />}
@@ -468,7 +472,7 @@ function RecipeBook() {
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox}) {
   return (
     <div>
       <div className="toolbar">
@@ -481,6 +485,9 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,search,setSearch,filterCu
         </select>
         <select className="filter-select" value={filterDiet} onChange={e=>setFilterDiet(e.target.value)}>
           <option value="">All Diets</option>{allDiets.map(d=><option key={d}>{d}</option>)}
+        </select>
+        <select className="filter-select" value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}>
+          <option value="">All Categories</option>{allCategories.map(c=><option key={c}>{c}</option>)}
         </select>
       </div>
       {selectedRecipe ? (
@@ -498,6 +505,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,search,setSearch,filterCu
               <div className="recipe-card-body">
                 <div className="recipe-card-title">{r.title}</div>
                 <div className="recipe-card-meta">
+                  {r.category && <span style={{background:'var(--saffron)',color:'white',padding:'1px 7px',borderRadius:2,fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px'}}>{r.category}</span>}
                   {r.cuisine && <span>🌍 {r.cuisine}</span>}
                   {r.prepTime!=null && <span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}
                   {r.servings && <span>👤 {r.servings}</span>}
@@ -668,7 +676,7 @@ function DinnerTab({recipes,selection,setSelection,onStartCook}) {
                 <div className="recipe-card-title">{r.title}</div>
                 <div style={{width:22,height:22,borderRadius:'50%',flexShrink:0,background:selection.includes(r.id)?COLORS[selection.indexOf(r.id)%COLORS.length]:'transparent',border:selection.includes(r.id)?'none':'2px solid var(--parchment-dark)',display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontSize:12,marginLeft:8}}>{selection.includes(r.id)?(selection.indexOf(r.id)+1):''}</div>
               </div>
-              <div className="recipe-card-meta">{r.cuisine&&<span>{r.cuisine}</span>}{r.prepTime!=null&&<span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}{r.calories&&<span>🔥 {r.calories} cal</span>}</div>
+              <div className="recipe-card-meta">{r.category&&<span style={{background:'var(--saffron)',color:'white',padding:'1px 6px',borderRadius:2,fontSize:11,fontWeight:700}}>{r.category}</span>}{r.cuisine&&<span>{r.cuisine}</span>}{r.prepTime!=null&&<span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}{r.calories&&<span>🔥 {r.calories} cal</span>}</div>
             </div>
           </div>
         ))}
@@ -723,7 +731,7 @@ function DiscoverTab({recipes,onAddRecipe}) {
     const userMsg = input.trim(); setInput(""); setMessages(m=>[...m,{role:"user",text:userMsg}]); setLoading(true);
     const sys = `You are a helpful culinary assistant. Saved recipes: ${savedTitles||"none"}.
 When generating a recipe output ONLY JSON (no markdown):
-{"type":"recipe","recipe":{"title":"","cuisine":"","servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"ingredients":[],"steps":[]}}
+{"type":"recipe","recipe":{"title":"","cuisine":"","category":"","servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"ingredients":[],"steps":[]}}
 diets from: Vegetarian,Vegan,Gluten-Free,Dairy-Free,Keto,Paleo,Nut-Free,Low-Carb,Low-Fat.
 Otherwise respond in plain text.`;
     try {
@@ -798,7 +806,7 @@ function parseStashcook(text) {
     }
     if(cur.trim()) steps.push(cur.trim());
     if(!title||!ingredients.length||!steps.length) return null;
-    return {id:uid(),title,cuisine:"",servings,prepTime:0,cookTime,description:"",tags:["imported","stashcook"],diets:[],calories:null,protein:null,carbs:null,fat:null,fiber:null,photo:null,ingredients,steps};
+    return {id:uid(),title,cuisine:"",category:"",servings,prepTime:0,cookTime,description:"",tags:["imported","stashcook"],diets:[],calories:null,protein:null,carbs:null,fat:null,fiber:null,photo:null,ingredients,steps};
   } catch { return null; }
 }
 
@@ -858,7 +866,7 @@ function ImportTab({onImport}) {
 
 // ── Recipe Modal (Add / Edit) ──────────────────────────────────────────────
 function RecipeModal({recipe,onSave,onClose}) {
-  const blank = {id:uid(),title:"",cuisine:"",servings:4,prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
+  const blank = {id:uid(),title:"",cuisine:"",category:"",servings:4,prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
   const [form,setForm] = useState(recipe ? {
     ...recipe,
     tags: Array.isArray(recipe.tags)?recipe.tags.join(", "):recipe.tags||"",
@@ -868,6 +876,7 @@ function RecipeModal({recipe,onSave,onClose}) {
     calories:recipe.calories||"",protein:recipe.protein||"",carbs:recipe.carbs||"",
     fat:recipe.fat||"",fiber:recipe.fiber||"",sugar:recipe.sugar||"",sodium:recipe.sodium||"",
     photo:recipe.photo||null,
+    category:recipe.category||"",
   } : blank);
 
   function set(k,v){setForm(f=>({...f,[k]:v}));}
@@ -899,8 +908,9 @@ function RecipeModal({recipe,onSave,onClose}) {
 
         <div className="form-section">Details</div>
         <div className="form-group"><label className="form-label">Recipe Title *</label><input className="form-input" value={form.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Spaghetti Carbonara" /></div>
-        <div className="form-row">
+        <div className="form-row-3">
           <div className="form-group"><label className="form-label">Cuisine</label><input className="form-input" value={form.cuisine} onChange={e=>set("cuisine",e.target.value)} placeholder="Italian, Thai…" /></div>
+          <div className="form-group"><label className="form-label">Category</label><select className="form-input" value={form.category||""} onChange={e=>set("category",e.target.value)}><option value="">None</option>{["Appetizer","Breakfast","Brunch","Lunch","Dinner","Dessert","Snack","Side Dish","Sauce","Topping","Dressing","Marinade","Soup","Salad","Bread","Drink","Other"].map(c=><option key={c}>{c}</option>)}</select></div>
           <div className="form-group"><label className="form-label">Servings</label><input className="form-input" type="number" value={form.servings} onChange={e=>set("servings",e.target.value)} /></div>
         </div>
         <div className="form-row">
