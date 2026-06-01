@@ -885,8 +885,7 @@ Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Fr
         <textarea
           className="ai-input"
           style={{width:'100%',minHeight:120,resize:'vertical',marginBottom:10,padding:12,fontSize:13,fontFamily:'monospace',borderRadius:3,display:'block'}}
-          placeholder={'Paste here — should start with {
-  "title": "..."'}
+          placeholder="Paste the full JSON here..."
           value={pasteText}
           onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}}
         />
