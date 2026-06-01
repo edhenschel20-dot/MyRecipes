@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>The Recipe Book</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    body { margin: 0; padding: 0; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+const STYLES = `
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=Special+Elite&family=Lato:wght@300;400;700&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --parchment: #f5f0e8; --parchment-dark: #ede5d0; --ink: #1a1410;
+    --ink-mid: #3d3028; --ink-light: #7a6a5a; --saffron: #d4891a;
+    --saffron-light: #f0b84b; --rust: #b84a2e; --sage: #5a7a4a;
+    --cream: #faf7f0; --shadow: rgba(26,20,16,0.12);
+  }
+  body { background: var(--parchment); color: var(--ink); font-family: 'Lato', sans-serif; min-height: 100vh; }
+  .app { max-width: 1200px; margin: 0 auto; padding: 0 16px 80px; }
+
+  /* Header */
+  .header { padding: 32px 0 24px; border-bottom: 2px solid var(--ink); margin-bottom: 32px; display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .header-title { font-family: 'Special Elite', monospace; font-size: clamp(28px,5vw,48px); color: var(--ink); letter-spacing: -1px; }
+  .header-title span { color: var(--saffron); }
+  .header-sub { font-family: 'Playfair Display', serif; font-style: italic; font-size: 14px; color: var(--ink-light); margin-top: 4px; }
+
+  /* Nav */
+  .nav-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--ink); margin-bottom: 28px; flex-wrap: wrap; }
+  .nav-tab { padding: 10px 20px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; background: none; border: none; color: var(--ink-light); border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+  .nav-tab:hover { color: var(--ink); }
+  .nav-tab.active { color: var(--saffron); border-bottom-color: var(--saffron); }
+
+  /* Recipe Grid — photo-aware cards */
+  .recipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+  .recipe-card { background: var(--cream); border: 1px solid var(--parchment-dark); border-radius: 6px; cursor: pointer; transition: all 0.2s; box-shadow: 2px 2px 0 var(--shadow); overflow: hidden; }
+  .recipe-card:hover { transform: translateY(-2px); box-shadow: 4px 8px 0 var(--shadow); }
+  .recipe-card.selected { border-color: var(--saffron); box-shadow: 0 0 0 2px var(--saffron); }
+  .recipe-card-photo { width: 100%; height: 180px; object-fit: cover; display: block; }
+  .recipe-card-photo-placeholder { width: 100%; height: 140px; background: var(--parchment-dark); display: flex; align-items: center; justify-content: center; font-size: 40px; color: var(--ink-light); }
+  .recipe-card-body { padding: 16px 20px 20px; position: relative; }
+  .recipe-card-body::before { content: ''; position: absolute; top: 0; left: 20px; right: 20px; height: 2px; background: var(--saffron); }
+  .recipe-card-title { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  .recipe-card-meta { font-size: 12px; color: var(--ink-light); display: flex; gap: 12px; flex-wrap: wrap; }
+  .recipe-card-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+  /* Tags */
+  .tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 2px; background: var(--parchment-dark); color: var(--ink-mid); }
+  .tag.diet { background: #d4e8d0; color: var(--sage); }
+  .tag.ai { background: #dce8d4; color: var(--sage); }
+
+  /* Toolbar */
+  .toolbar { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
+  .search-input { flex: 1; min-width: 200px; padding: 10px 14px; font-family: 'Lato', sans-serif; font-size: 14px; border: 1px solid var(--ink-mid); background: var(--cream); color: var(--ink); border-radius: 3px; outline: none; }
+  .search-input:focus { border-color: var(--saffron); box-shadow: 0 0 0 2px rgba(212,137,26,0.2); }
+  .filter-select { padding: 10px 14px; font-family: 'Lato', sans-serif; font-size: 13px; border: 1px solid var(--ink-mid); background: var(--cream); color: var(--ink); border-radius: 3px; cursor: pointer; }
+
+  /* Buttons */
+  .btn { padding: 10px 20px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border-radius: 3px; transition: all 0.15s; border: 2px solid; }
+  .btn-primary { background: var(--saffron); color: white; border-color: var(--saffron); }
+  .btn-primary:hover { background: var(--saffron-light); border-color: var(--saffron-light); }
+  .btn-outline { background: none; color: var(--ink); border-color: var(--ink); }
+  .btn-outline:hover { background: var(--ink); color: var(--cream); }
+  .btn-ghost { background: none; color: var(--ink-light); border-color: transparent; }
+  .btn-ghost:hover { color: var(--ink); border-color: var(--parchment-dark); }
+  .btn-danger { background: none; color: var(--rust); border-color: var(--rust); }
+  .btn-danger:hover { background: var(--rust); color: white; }
+  .btn-sm { padding: 6px 12px; font-size: 11px; }
+  .btn-icon { padding: 8px; border: none; background: none; cursor: pointer; color: var(--ink-light); font-size: 18px; transition: color 0.2s; }
+  .btn-icon:hover { color: var(--saffron); }
+
+  /* Detail panel */
+  .detail-panel { background: var(--cream); border: 1px solid var(--parchment-dark); border-radius: 6px; box-shadow: 3px 3px 0 var(--shadow); overflow: hidden; }
+  .detail-hero { position: relative; width: 100%; height: 300px; background: var(--parchment-dark); overflow: hidden; }
+  .detail-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .detail-hero-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 72px; color: var(--ink-light); background: var(--parchment-dark); }
+  .detail-hero-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 40%, rgba(26,20,16,0.7)); }
+  .detail-hero-actions { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; }
+  .detail-hero-btn { padding: 8px 14px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; border-radius: 3px; cursor: pointer; border: none; backdrop-filter: blur(8px); transition: all 0.15s; }
+  .detail-hero-btn-light { background: rgba(255,255,255,0.85); color: var(--ink); }
+  .detail-hero-btn-light:hover { background: white; }
+  .detail-hero-btn-primary { background: rgba(212,137,26,0.9); color: white; }
+  .detail-hero-btn-primary:hover { background: var(--saffron); }
+  .detail-hero-btn-danger { background: rgba(184,74,46,0.85); color: white; }
+  .detail-hero-btn-danger:hover { background: var(--rust); }
+  .detail-content { padding: 28px 32px 32px; }
+  .detail-title { font-family: 'Playfair Display', serif; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+  .detail-meta { display: flex; gap: 20px; color: var(--ink-light); font-size: 13px; margin-bottom: 20px; flex-wrap: wrap; }
+  .detail-section-title { font-family: 'Special Elite', monospace; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; color: var(--ink-mid); margin: 24px 0 12px; border-bottom: 1px solid var(--parchment-dark); padding-bottom: 8px; }
+
+  /* Ingredients & steps */
+  .ingredient-list { list-style: none; }
+  .ingredient-list li { padding: 6px 0; border-bottom: 1px dashed var(--parchment-dark); font-size: 15px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .ing-amount { font-weight: 700; color: var(--saffron); min-width: 80px; }
+  .ing-name { flex: 1; }
+  .step-list { list-style: none; counter-reset: steps; }
+  .step-list li { counter-increment: steps; padding: 10px 0 10px 44px; position: relative; border-bottom: 1px solid var(--parchment-dark); font-size: 15px; line-height: 1.6; }
+  .step-list li::before { content: counter(steps); position: absolute; left: 0; top: 10px; width: 28px; height: 28px; background: var(--ink); color: var(--cream); display: flex; align-items: center; justify-content: center; font-family: 'Special Elite', monospace; font-size: 13px; border-radius: 50%; }
+
+  /* Nutrition */
+  .nutrition-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 4px; }
+  .nutrition-card { background: var(--parchment-dark); border-radius: 4px; padding: 10px 12px; text-align: center; }
+  .nutrition-value { font-family: 'Special Elite', monospace; font-size: 20px; color: var(--ink); }
+  .nutrition-unit { font-size: 11px; color: var(--ink-light); }
+  .nutrition-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-mid); margin-top: 2px; }
+
+  /* Diet */
+  .diet-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .diet-badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; background: #d4e8d0; color: var(--sage); border: 1px solid #b0d4aa; }
+
+  /* Scaler */
+  .servings-scaler { display: flex; align-items: center; gap: 12px; background: var(--parchment-dark); padding: 10px 16px; border-radius: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+  .scaler-label { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mid); }
+  .scaler-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--saffron); background: none; color: var(--saffron); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: 700; transition: all 0.15s; line-height: 1; }
+  .scaler-btn:hover { background: var(--saffron); color: white; }
+  .scaler-value { font-family: 'Special Elite', monospace; font-size: 22px; color: var(--ink); min-width: 32px; text-align: center; }
+  .scaler-original { font-size: 12px; color: var(--ink-light); }
+
+  /* Photo upload widget */
+  .photo-upload-label { display: block; border: 2px dashed var(--parchment-dark); border-radius: 6px; padding: 28px 16px; text-align: center; background: var(--cream); cursor: pointer; -webkit-tap-highlight-color: rgba(212,137,26,0.1); }
+  .photo-upload-label:active { background: rgba(212,137,26,0.06); border-color: var(--saffron); }
+  .photo-upload-label input[type=file] { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
+  .photo-upload-icon { font-size: 36px; display: block; margin-bottom: 10px; pointer-events: none; }
+  .photo-upload-text { display: block; font-size: 15px; font-weight: 700; color: var(--saffron); pointer-events: none; margin-bottom: 4px; }
+  .photo-upload-sub { display: block; font-size: 12px; color: var(--ink-light); pointer-events: none; }
+  .photo-preview-wrap { position: relative; width: 100%; }
+  .photo-preview { width: 100%; max-height: 220px; object-fit: cover; border-radius: 4px; display: block; }
+  .photo-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .photo-change-label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: none; color: var(--ink-mid); border: 2px solid var(--parchment-dark); border-radius: 3px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; -webkit-tap-highlight-color: rgba(0,0,0,0.05); }
+  .photo-change-label input[type=file] { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
+  .photo-change-label:active { background: var(--parchment-dark); }
+  .photo-remove-btn { padding: 8px 16px; background: none; color: var(--rust); border: 2px solid var(--rust); border-radius: 3px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; -webkit-tap-highlight-color: rgba(184,74,46,0.1); }
+  .photo-remove-btn:active { background: var(--rust); color: white; }
+
+  /* Photo lightbox */
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 200; display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  .lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; border-radius: 4px; }
+  .lightbox-close { position: absolute; top: 20px; right: 24px; font-size: 32px; color: rgba(255,255,255,0.7); cursor: pointer; line-height: 1; background: none; border: none; }
+
+  /* Cook mode */
+  .cook-mode-overlay { position: fixed; inset: 0; background: var(--ink); color: var(--cream); z-index: 100; display: flex; flex-direction: column; font-family: 'Lato', sans-serif; overflow-y: auto; }
+  .cook-header { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .cook-title { font-family: 'Special Elite', monospace; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.6; }
+  .cook-recipe-name { font-family: 'Playfair Display', serif; font-size: 22px; color: var(--saffron-light); }
+  .cook-progress { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cook-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.2); transition: background 0.3s; }
+  .cook-dot.done { background: var(--saffron); }
+  .cook-dot.current { background: var(--saffron-light); transform: scale(1.4); }
+  .cook-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; text-align: center; }
+  .cook-photo { width: 180px; height: 180px; object-fit: cover; border-radius: 50%; margin-bottom: 24px; border: 4px solid rgba(240,184,75,0.4); }
+  .cook-step-num { font-family: 'Special Elite', monospace; font-size: 64px; color: rgba(255,255,255,0.08); line-height: 1; margin-bottom: 8px; }
+  .cook-recipe-label { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--saffron); margin-bottom: 16px; font-weight: 700; }
+  .cook-step-text { font-family: 'Playfair Display', serif; font-size: clamp(20px,3.5vw,32px); line-height: 1.5; max-width: 700px; }
+  .cook-nav { display: flex; gap: 20px; align-items: center; padding: 24px; justify-content: center; }
+  .cook-nav-btn { padding: 14px 32px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; border-radius: 3px; cursor: pointer; border: 2px solid; }
+  .cook-prev { background: none; border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.6); }
+  .cook-prev:hover { border-color: white; color: white; }
+  .cook-next { background: var(--saffron); border-color: var(--saffron); color: white; }
+  .cook-next:hover { background: var(--saffron-light); border-color: var(--saffron-light); }
+
+  /* Dinner planner */
+  .orch-timeline { position: relative; }
+  .orch-entry { display: flex; align-items: flex-start; gap: 16px; padding: 14px 0; border-bottom: 1px dashed var(--parchment-dark); }
+  .orch-badge { flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Special Elite', monospace; font-size: 13px; font-weight: 700; color: white; }
+  .orch-step-text { font-size: 15px; line-height: 1.5; }
+  .orch-recipe-name { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 2px; opacity: 0.7; }
+  .dinner-card-thumb { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid var(--parchment-dark); flex-shrink: 0; }
+  .dinner-card-thumb-placeholder { width: 48px; height: 48px; border-radius: 50%; background: var(--parchment-dark); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+
+  /* AI panel */
+  .ai-panel { background: var(--cream); border: 1px solid var(--parchment-dark); border-radius: 4px; padding: 24px; }
+  .ai-messages { max-height: 400px; overflow-y: auto; margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .ai-msg { padding: 12px 16px; border-radius: 4px; font-size: 14px; line-height: 1.6; }
+  .ai-msg.user { background: var(--parchment-dark); align-self: flex-end; max-width: 80%; }
+  .ai-msg.assistant { background: white; border: 1px solid var(--parchment-dark); max-width: 90%; white-space: pre-wrap; }
+  .ai-msg.loading { opacity: 0.6; font-style: italic; }
+  .ai-input-row { display: flex; gap: 10px; }
+  .ai-input { flex: 1; padding: 10px 14px; font-family: 'Lato', sans-serif; font-size: 14px; border: 1px solid var(--ink-mid); background: white; color: var(--ink); border-radius: 3px; }
+  .ai-input:focus { outline: none; border-color: var(--saffron); }
+
+  /* Form */
+  .form-group { margin-bottom: 16px; }
+  .form-label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-mid); margin-bottom: 6px; }
+  .form-input { width: 100%; padding: 10px 12px; font-family: 'Lato', sans-serif; font-size: 14px; border: 1px solid var(--parchment-dark); background: var(--cream); color: var(--ink); border-radius: 3px; }
+  .form-input:focus { outline: none; border-color: var(--saffron); box-shadow: 0 0 0 2px rgba(212,137,26,0.15); }
+  .form-textarea { min-height: 80px; resize: vertical; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media (max-width: 500px) { .form-row, .form-row-3 { grid-template-columns: 1fr; } }
+  .form-section { margin: 20px 0 12px; font-family: 'Special Elite', monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: var(--ink-mid); border-bottom: 1px solid var(--parchment-dark); padding-bottom: 6px; }
+  .checkbox-group { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; }
+  .checkbox-label input { accent-color: var(--saffron); width: 15px; height: 15px; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(26,20,16,0.6); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal { background: var(--cream); border-radius: 4px; padding: 32px; max-width: 680px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 6px 6px 0 rgba(26,20,16,0.2); }
+  .modal-title { font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 700; margin-bottom: 20px; }
+
+  /* Misc */
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--ink-light); }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-title { font-family: 'Playfair Display', serif; font-size: 22px; margin-bottom: 8px; color: var(--ink-mid); }
+  .flex { display: flex; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .gap-8 { gap: 8px; }
+  .mt-16 { margin-top: 16px; }
+  .text-muted { color: var(--ink-light); font-size: 13px; }
+  .color-swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+`;
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const DIET_OPTIONS = ["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Nut-Free","Low-Carb","Low-Fat","Halal","Kosher"];
+const COLORS = ["#d4891a","#b84a2e","#5a7a4a","#4a6a8a","#8a4a7a","#6a8a4a"];
+const FOOD_EMOJIS = { pasta:"🍝", chicken:"🍗", salad:"🥗", soup:"🍜", beef:"🥩", fish:"🐟", pizza:"🍕", default:"🍽" };
+
+function recipeEmoji(r) {
+  const t = (r.title+" "+(r.tags||[]).join(" ")).toLowerCase();
+  for (const [k,v] of Object.entries(FOOD_EMOJIS)) if (t.includes(k)) return v;
+  return FOOD_EMOJIS.default;
+}
+
+// ── Image helpers ──────────────────────────────────────────────────────────
+function compressImage(file, maxPx = 1200, quality = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      const scale = Math.min(1, maxPx / Math.max(width, height));
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+// ── Photo Upload Component ─────────────────────────────────────────────────
+// Label-wraps the input — the only approach that works reliably across all
+// mobile browsers including Android Chrome in iframes.
+function PhotoUpload({ value, onChange }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleChange(e) {
+    const file = e.target.files[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    setLoading(true);
+    const compressed = await compressImage(file);
+    setLoading(false);
+    if (compressed) onChange(compressed);
+    e.target.value = ""; // allow re-selecting same file
+  }
+
+  if (value) {
+    return (
+      <div className="photo-preview-wrap">
+        <img src={value} alt="Recipe" className="photo-preview" />
+        <div className="photo-actions">
+          <label className="photo-change-label">
+            <input type="file" accept="image/*" onChange={handleChange} />
+            📷 Change
+          </label>
+          <button type="button" className="photo-remove-btn" onClick={() => onChange(null)}>
+            ✕ Remove
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <label className="photo-upload-label">
+      <input type="file" accept="image/*" onChange={handleChange} />
+      <span className="photo-upload-icon">{loading ? "⏳" : "📷"}</span>
+      <span className="photo-upload-text">{loading ? "Processing…" : "Tap to add a photo"}</span>
+      <span className="photo-upload-sub">Opens your camera roll or gallery</span>
+    </label>
+  );
+}
+
+// ── Ingredient scaling helpers ─────────────────────────────────────────────
+const UNIT_ALIASES = {
+  tablespoon:["tbsp","tablespoon","tablespoons","T"],
+  teaspoon:["tsp","teaspoon","teaspoons","t"],
+  cup:["cup","cups","c"],
+  ounce:["oz","ounce","ounces"],
+  pound:["lb","lbs","pound","pounds"],
+  gram:["g","gram","grams"],
+  kilogram:["kg","kilogram","kilograms"],
+  milliliter:["ml","milliliter","milliliters","mL"],
+  liter:["l","L","liter","liters"],
+  pinch:["pinch","pinches"],
+};
+const UNIT_DISPLAY = { tablespoon:"tbsp", teaspoon:"tsp", cup:"cup", ounce:"oz", pound:"lb", gram:"g", kilogram:"kg", milliliter:"ml", liter:"L", pinch:"pinch" };
+
+function parseIngredient(raw) {
+  const frac = {"½":0.5,"⅓":1/3,"⅔":2/3,"¼":0.25,"¾":0.75,"⅛":0.125};
+  let str = raw.trim();
+  Object.entries(frac).forEach(([k,v]) => { str = str.replace(k, String(v)); });
+  const numRe = /^(\d+\s+\d+\/\d+|\d+\/\d+|\d*\.?\d+)\s*/;
+  const numMatch = str.match(numRe);
+  let amount = null;
+  if (numMatch) {
+    const ns = numMatch[1].trim();
+    if (ns.includes(" ")) { const [w,f] = ns.split(" "); const [n,d] = f.split("/"); amount = +w + +n/+d; }
+    else if (ns.includes("/")) { const [n,d] = ns.split("/"); amount = +n/+d; }
+    else amount = +ns;
+    str = str.slice(numMatch[0].length);
+  }
+  let unitKey = null, unitRaw = "";
+  for (const [key, aliases] of Object.entries(UNIT_ALIASES)) {
+    for (const a of aliases) {
+      const re = new RegExp(`^${a}s?\\b\\.?\\s*`, "i");
+      if (re.test(str)) { unitKey = key; unitRaw = str.match(re)[0]; str = str.slice(unitRaw.length); break; }
+    }
+    if (unitKey) break;
+  }
+  return { amount, unitKey, unitDisplay: unitKey ? UNIT_DISPLAY[unitKey] : "", name: str.trim(), raw };
+}
+
+function formatAmount(amount, scale, unitKey) {
+  if (amount === null) return "";
+  const scaled = amount * scale;
+  if (unitKey === "teaspoon" || unitKey === "tablespoon" || unitKey === "cup") {
+    const fracs = [[1/8,"⅛"],[1/4,"¼"],[1/3,"⅓"],[1/2,"½"],[2/3,"⅔"],[3/4,"¾"]];
+    const whole = Math.floor(scaled);
+    const rem = scaled - whole;
+    const match = fracs.find(([v]) => Math.abs(rem - v) < 0.05);
+    if (match) return whole > 0 ? `${whole} ${match[1]}` : match[1];
+  }
+  if (scaled >= 100) return Math.round(scaled).toString();
+  if (Number.isInteger(scaled) || scaled >= 10) return +scaled.toFixed(1) === Math.round(scaled) ? Math.round(scaled).toString() : scaled.toFixed(1);
+  return +scaled.toFixed(2) === Math.round(scaled*10)/10 ? scaled.toFixed(1) : scaled.toFixed(2).replace(/0+$/,"");
+}
+
+// ── Sample data ────────────────────────────────────────────────────────────
+const SAMPLE_RECIPES = [
+  { id:"r1", title:"Spaghetti Carbonara", cuisine:"Italian", servings:4, prepTime:10, cookTime:20, tags:["pasta","quick","eggs"], diets:[], calories:620, protein:28, carbs:72, fat:22, fiber:3, photo:null, description:"Classic Roman pasta with guanciale, eggs, and Pecorino.", ingredients:["400g spaghetti","200g guanciale, diced","4 egg yolks","1 whole egg","100g Pecorino Romano, grated","Black pepper, generous amount","Salt for pasta water"], steps:["Bring a large pot of water to boil. Salt generously.","Fry guanciale in a dry pan over medium heat until crispy. Remove from heat.","Whisk egg yolks, whole egg, and Pecorino together. Season heavily with black pepper.","Cook spaghetti until al dente. Reserve 1 cup pasta water.","Add hot pasta to guanciale pan (off heat). Pour egg mixture over, tossing rapidly.","Add pasta water splash by splash until silky and creamy. Serve immediately."] },
+  { id:"r2", title:"Roasted Garlic Chicken Thighs", cuisine:"American", servings:4, prepTime:15, cookTime:45, tags:["chicken","roasted","easy"], diets:["Gluten-Free","Dairy-Free"], calories:480, protein:42, carbs:5, fat:32, fiber:1, photo:null, description:"Crispy-skinned thighs with roasted garlic and herbs.", ingredients:["8 bone-in chicken thighs","1 whole head of garlic","3 tbsp olive oil","1 lemon, zested and halved","2 tsp fresh thyme","1 tsp rosemary","Salt and pepper"], steps:["Preheat oven to 425°F. Pat chicken dry with paper towels.","Toss chicken with olive oil, lemon zest, thyme, rosemary, salt and pepper.","Slice top off garlic head, wrap in foil with a drizzle of oil.","Place chicken skin-side up with garlic in a cast iron pan.","Roast 40-45 min until skin is deep golden and internal temp reaches 165°F.","Squeeze roasted garlic over chicken. Rest 5 minutes before serving."] },
+  { id:"r3", title:"Simple Green Salad", cuisine:"French", servings:4, prepTime:10, cookTime:0, tags:["salad","quick","side"], diets:["Vegetarian","Vegan","Gluten-Free","Dairy-Free"], calories:140, protein:2, carbs:6, fat:13, fiber:2, photo:null, description:"Crisp greens with a classic Dijon vinaigrette.", ingredients:["5oz mixed greens","1 tsp Dijon mustard","2 tbsp red wine vinegar","5 tbsp olive oil","1 shallot, minced","Salt and pepper"], steps:["Whisk together mustard, vinegar, and shallot. Season with salt and pepper.","Slowly drizzle in olive oil, whisking continuously until emulsified.","Toss greens with just enough dressing to coat lightly.","Taste and adjust seasoning. Serve immediately."] }
+];
+
+// ── Storage ────────────────────────────────────────────────────────────────
+const STORAGE_KEY = "recipebook_v3";
+function loadData() {
+  try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
+  return { recipes: SAMPLE_RECIPES };
+}
+function saveData(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} }
+function uid() { return "r" + Math.random().toString(36).slice(2,9); }
+
+// ── App ────────────────────────────────────────────────────────────────────
+function RecipeBook() {
+  const [data, setData] = useState(() => loadData());
+  const [tab, setTab] = useState("library");
+  const [search, setSearch] = useState("");
+  const [filterCuisine, setFilterCuisine] = useState("");
+  const [filterTag, setFilterTag] = useState("");
+  const [filterDiet, setFilterDiet] = useState("");
+  const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editRecipe, setEditRecipe] = useState(null);
+  const [cookMode, setCookMode] = useState(null);
+  const [dinnerSelection, setDinnerSelection] = useState([]);
+  const [dinnerCookMode, setDinnerCookMode] = useState(null);
+  const [lightbox, setLightbox] = useState(null);
+  const recipes = data.recipes;
+  useEffect(() => { saveData(data); }, [data]);
+
+  function upsertRecipe(r) {
+    setData(d => { const e = d.recipes.find(x=>x.id===r.id); return {...d, recipes: e ? d.recipes.map(x=>x.id===r.id?r:x) : [r,...d.recipes]}; });
+    // If we're viewing this recipe, refresh it
+    if (selectedRecipe?.id === r.id) setSelectedRecipe(r);
+  }
+  function deleteRecipe(id) { setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
+
+  const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
+  const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
+  const allDiets = [...new Set(recipes.flatMap(r=>r.diets||[]))];
+  const filtered = recipes.filter(r => {
+    const q = search.toLowerCase();
+    return (!q || r.title.toLowerCase().includes(q) || (r.tags||[]).some(t=>t.includes(q)) || (r.cuisine||"").toLowerCase().includes(q))
+      && (!filterCuisine || r.cuisine===filterCuisine)
+      && (!filterTag || (r.tags||[]).includes(filterTag))
+      && (!filterDiet || (r.diets||[]).includes(filterDiet));
+  });
+
+  function startCookMode(recipe) {
+    setCookMode({ recipe, steps: recipe.steps.map((s,i)=>({text:s,num:i+1,recipe:recipe.title,photo:recipe.photo})), currentIndex:0 });
+  }
+  function buildDinnerSteps(ids) {
+    const sel = ids.map(id=>recipes.find(r=>r.id===id)).filter(Boolean);
+    const colorMap = {}; sel.forEach((r,i)=>{colorMap[r.id]=COLORS[i%COLORS.length];});
+    const all = []; sel.forEach(r=>{ r.steps.forEach((text,idx)=>{ all.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,totalSteps:r.steps.length,globalOrder:idx/r.steps.length,photo:r.photo}); }); });
+    all.sort((a,b)=>a.globalOrder-b.globalOrder || sel.findIndex(r=>r.id===a.recipeId)-sel.findIndex(r=>r.id===b.recipeId));
+    return all;
+  }
+
+  return (
+    <>
+      <style>{STYLES}</style>
+      <div className="app">
+        <header className="header">
+          <div>
+            <div className="header-title">The <span>Recipe</span> Book</div>
+            <div className="header-sub">your kitchen, organized & intelligently guided</div>
+          </div>
+          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Recipe</button>
+        </header>
+        <nav className="nav-tabs">
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"]].map(([id,label])=>(
+            <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
+          ))}
+        </nav>
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={setLightbox} />}
+        {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
+        {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
+        {tab==="import" && <ImportTab onImport={r=>{upsertRecipe(r);}} />}
+      </div>
+      {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{upsertRecipe(r);setShowAdd(false);setEditRecipe(null);}} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
+      {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
+      {dinnerCookMode && <CookModeOverlay steps={dinnerCookMode.steps} currentIndex={dinnerCookMode.currentIndex} onNav={dir=>setDinnerCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setDinnerCookMode(null)} isDinner />}
+      {lightbox && <div className="lightbox" onClick={()=>setLightbox(null)}><button className="lightbox-close" onClick={()=>setLightbox(null)}>✕</button><img src={lightbox} alt="Recipe" onClick={e=>e.stopPropagation()} /></div>}
+    </>
+  );
+}
+
+// ── Library Tab ────────────────────────────────────────────────────────────
+function LibraryTab({recipes,cuisines,allTags,allDiets,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox}) {
+  return (
+    <div>
+      <div className="toolbar">
+        <input className="search-input" placeholder="Search recipes, tags, cuisine…" value={search} onChange={e=>setSearch(e.target.value)} />
+        <select className="filter-select" value={filterCuisine} onChange={e=>setFilterCuisine(e.target.value)}>
+          <option value="">All Cuisines</option>{cuisines.map(c=><option key={c}>{c}</option>)}
+        </select>
+        <select className="filter-select" value={filterTag} onChange={e=>setFilterTag(e.target.value)}>
+          <option value="">All Tags</option>{allTags.map(t=><option key={t}>{t}</option>)}
+        </select>
+        <select className="filter-select" value={filterDiet} onChange={e=>setFilterDiet(e.target.value)}>
+          <option value="">All Diets</option>{allDiets.map(d=><option key={d}>{d}</option>)}
+        </select>
+      </div>
+      {selectedRecipe ? (
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} />
+      ) : recipes.length===0 ? (
+        <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
+      ) : (
+        <div className="recipe-grid">
+          {recipes.map(r=>(
+            <div key={r.id} className="recipe-card" onClick={()=>setSelectedRecipe(r)}>
+              {r.photo
+                ? <img src={r.photo} alt={r.title} className="recipe-card-photo" />
+                : <div className="recipe-card-photo-placeholder">{recipeEmoji(r)}</div>
+              }
+              <div className="recipe-card-body">
+                <div className="recipe-card-title">{r.title}</div>
+                <div className="recipe-card-meta">
+                  {r.cuisine && <span>🌍 {r.cuisine}</span>}
+                  {r.prepTime!=null && <span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}
+                  {r.servings && <span>👤 {r.servings}</span>}
+                  {r.calories && <span>🔥 {r.calories} cal</span>}
+                </div>
+                {r.description && <p style={{fontSize:13,color:'var(--ink-light)',marginTop:8,lineHeight:1.5}}>{r.description}</p>}
+                <div className="recipe-card-tags">
+                  {(r.diets||[]).map(d=><span key={d} className="tag diet">{d}</span>)}
+                  {(r.tags||[]).map(t=><span key={t} className="tag">{t}</span>)}
+                  {r.aiGenerated && <span className="tag ai">AI</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Recipe Detail ──────────────────────────────────────────────────────────
+function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox}) {
+  const [servings, setServings] = useState(recipe.servings || 4);
+  const base = recipe.servings || 4;
+  const scale = servings / base;
+  const hasNutrition = recipe.calories || recipe.protein || recipe.carbs || recipe.fat;
+
+  return (
+    <div>
+      <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Library</button></div>
+      <div className="detail-panel">
+        {/* Hero photo */}
+        <div className="detail-hero">
+          {recipe.photo
+            ? <img src={recipe.photo} alt={recipe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in"}} onClick={()=>onLightbox(recipe.photo)} />
+            : <div className="detail-hero-placeholder">{recipeEmoji(recipe)}</div>
+          }
+          <div className="detail-hero-overlay" />
+          <div className="detail-hero-actions">
+            <button className="detail-hero-btn detail-hero-btn-primary" onClick={()=>onCook(recipe)}>▶ Cook</button>
+            <button className="detail-hero-btn detail-hero-btn-light" onClick={()=>onEdit(recipe)}>Edit</button>
+            <button className="detail-hero-btn detail-hero-btn-danger" onClick={()=>onDelete(recipe.id)}>Delete</button>
+          </div>
+        </div>
+
+        <div className="detail-content">
+          <div className="detail-title">{recipe.title}</div>
+          <div className="detail-meta">
+            {recipe.cuisine && <span>🌍 {recipe.cuisine}</span>}
+            {recipe.prepTime!=null && <span>⏱ Prep: {recipe.prepTime} min</span>}
+            {recipe.cookTime!=null && <span>🔥 Cook: {recipe.cookTime} min</span>}
+          </div>
+          {(recipe.diets||[]).length>0 && <div className="diet-badges">{recipe.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
+          {recipe.description && <p style={{fontSize:15,color:'var(--ink-mid)',lineHeight:1.6,marginTop:12}}>{recipe.description}</p>}
+          <div className="recipe-card-tags" style={{marginTop:12}}>{(recipe.tags||[]).map(t=><span key={t} className="tag">{t}</span>)}</div>
+
+          {hasNutrition && (
+            <>
+              <div className="detail-section-title">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:'none',letterSpacing:0}}>per serving</span></div>
+              <div className="nutrition-grid">
+                {recipe.calories && <div className="nutrition-card"><div className="nutrition-value">{recipe.calories}</div><div className="nutrition-unit">kcal</div><div className="nutrition-label">Calories</div></div>}
+                {recipe.protein && <div className="nutrition-card"><div className="nutrition-value">{recipe.protein}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Protein</div></div>}
+                {recipe.carbs && <div className="nutrition-card"><div className="nutrition-value">{recipe.carbs}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Carbs</div></div>}
+                {recipe.fat && <div className="nutrition-card"><div className="nutrition-value">{recipe.fat}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Fat</div></div>}
+                {recipe.fiber && <div className="nutrition-card"><div className="nutrition-value">{recipe.fiber}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Fiber</div></div>}
+                {recipe.sugar && <div className="nutrition-card"><div className="nutrition-value">{recipe.sugar}<span className="nutrition-unit">g</span></div><div className="nutrition-label">Sugar</div></div>}
+                {recipe.sodium && <div className="nutrition-card"><div className="nutrition-value">{recipe.sodium}<span className="nutrition-unit">mg</span></div><div className="nutrition-label">Sodium</div></div>}
+              </div>
+            </>
+          )}
+
+          <div className="detail-section-title">Ingredients</div>
+          <div className="servings-scaler">
+            <span className="scaler-label">Servings</span>
+            <button className="scaler-btn" onClick={()=>setServings(s=>Math.max(1,s-1))}>−</button>
+            <span className="scaler-value">{servings}</span>
+            <button className="scaler-btn" onClick={()=>setServings(s=>s+1)}>+</button>
+            {scale!==1 && <span className="scaler-original">(recipe makes {base})</span>}
+            {scale!==1 && recipe.calories && <span style={{marginLeft:'auto',fontSize:13,color:'var(--saffron)',fontWeight:700}}>{Math.round(recipe.calories * servings)} kcal total</span>}
+          </div>
+          <ul className="ingredient-list">
+            {(recipe.ingredients||[]).map((ing,i)=>{
+              const p = parseIngredient(ing);
+              const hasAmt = p.amount !== null && scale !== 1;
+              return (
+                <li key={i}>
+                  {hasAmt
+                    ? <><span className="ing-amount">{formatAmount(p.amount,scale,p.unitKey)} {p.unitDisplay}</span><span className="ing-name">{p.name}</span></>
+                    : <span className="ing-name" style={{flex:'unset'}}>{ing}</span>
+                  }
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="detail-section-title">Method</div>
+          <ol className="step-list">{(recipe.steps||[]).map((step,i)=><li key={i}>{step}</li>)}</ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Cook Mode ──────────────────────────────────────────────────────────────
+function CookModeOverlay({steps,currentIndex,onNav,onClose,isDinner}) {
+  const step = steps[currentIndex];
+  const wakeLockRef = useRef(null);
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [wakeLockSupported] = useState(()=>"wakeLock" in navigator);
+  useEffect(()=>{
+    async function acquire() { try { wakeLockRef.current = await navigator.wakeLock.request("screen"); setWakeLockActive(true); wakeLockRef.current.addEventListener("release",()=>setWakeLockActive(false)); } catch {} }
+    if(wakeLockSupported) acquire();
+    return ()=>{ wakeLockRef.current?.release(); };
+  },[wakeLockSupported]);
+  useEffect(()=>{
+    async function reacquire() { if(wakeLockSupported && document.visibilityState==="visible") { try { wakeLockRef.current = await navigator.wakeLock.request("screen"); setWakeLockActive(true); wakeLockRef.current.addEventListener("release",()=>setWakeLockActive(false)); } catch {} } }
+    document.addEventListener("visibilitychange",reacquire);
+    return ()=>document.removeEventListener("visibilitychange",reacquire);
+  },[wakeLockSupported]);
+
+  return (
+    <div className="cook-mode-overlay">
+      <div className="cook-header">
+        <div><div className="cook-title">{isDinner?"Dinner Cook Mode":"Cook Mode"}</div><div className="cook-recipe-name">{step.recipe}</div></div>
+        <div style={{display:'flex',alignItems:'center',gap:16}}>
+          {wakeLockSupported && <div style={{fontSize:16,opacity:wakeLockActive?1:0.35}}>{wakeLockActive?"☀️":"🌑"}</div>}
+          <div className="cook-progress">{steps.map((_,i)=><div key={i} className={`cook-dot${i<currentIndex?" done":i===currentIndex?" current":""}`}/>)}</div>
+          <button className="btn-icon" style={{color:'rgba(255,255,255,0.5)',fontSize:24}} onClick={onClose}>✕</button>
+        </div>
+      </div>
+      <div className="cook-body">
+        {step.photo && <img src={step.photo} alt={step.recipe} className="cook-photo" />}
+        <div className="cook-step-num">{step.num||(currentIndex+1)}</div>
+        {isDinner && <div className="cook-recipe-label" style={{color:step.color||'var(--saffron)'}}>{step.recipe}</div>}
+        <div className="cook-step-text">{step.text}</div>
+      </div>
+      <div className="cook-nav">
+        <button className="cook-nav-btn cook-prev" onClick={()=>onNav(-1)} style={{opacity:currentIndex===0?0.3:1}}>← Prev</button>
+        <span style={{color:'rgba(255,255,255,0.4)',fontSize:13}}>{currentIndex+1} / {steps.length}</span>
+        {currentIndex<steps.length-1 ? <button className="cook-nav-btn cook-next" onClick={()=>onNav(1)}>Next →</button> : <button className="cook-nav-btn cook-next" onClick={onClose}>Done ✓</button>}
+      </div>
+    </div>
+  );
+}
+
+// ── Dinner Planner ─────────────────────────────────────────────────────────
+function DinnerTab({recipes,selection,setSelection,onStartCook}) {
+  const toggle = id => setSelection(s=>s.includes(id)?s.filter(x=>x!==id):s.length<6?[...s,id]:s);
+  const selectedRecipes = selection.map(id=>recipes.find(r=>r.id===id)).filter(Boolean);
+  function buildPreview(sel) {
+    const colorMap={}; sel.forEach((r,i)=>{colorMap[r.id]=COLORS[i%COLORS.length];});
+    const steps=[]; sel.forEach(r=>{r.steps.forEach((text,idx)=>steps.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,globalOrder:idx/r.steps.length}));});
+    steps.sort((a,b)=>a.globalOrder-b.globalOrder||sel.findIndex(r=>r.id===a.recipeId)-sel.findIndex(r=>r.id===b.recipeId));
+    return steps;
+  }
+  return (
+    <div>
+      <div style={{marginBottom:24}}><div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>Dinner Orchestrator</div><p className="text-muted">Select 2–6 dishes. Cook Mode will interleave all steps so everything finishes together.</p></div>
+      <div className="recipe-grid" style={{marginBottom:32}}>
+        {recipes.map(r=>(
+          <div key={r.id} className={`recipe-card${selection.includes(r.id)?" selected":""}`} onClick={()=>toggle(r.id)}>
+            {r.photo
+              ? <img src={r.photo} alt={r.title} className="recipe-card-photo" style={{height:120}} />
+              : <div className="recipe-card-photo-placeholder" style={{height:80}}>{recipeEmoji(r)}</div>
+            }
+            <div className="recipe-card-body">
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                <div className="recipe-card-title">{r.title}</div>
+                <div style={{width:22,height:22,borderRadius:'50%',flexShrink:0,background:selection.includes(r.id)?COLORS[selection.indexOf(r.id)%COLORS.length]:'transparent',border:selection.includes(r.id)?'none':'2px solid var(--parchment-dark)',display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontSize:12,marginLeft:8}}>{selection.includes(r.id)?(selection.indexOf(r.id)+1):''}</div>
+              </div>
+              <div className="recipe-card-meta">{r.cuisine&&<span>{r.cuisine}</span>}{r.prepTime!=null&&<span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}{r.calories&&<span>🔥 {r.calories} cal</span>}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {selection.length>=2 && (
+        <div className="detail-panel">
+          <div style={{padding:'20px 24px',borderBottom:'1px solid var(--parchment-dark)',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12}}>
+            <div style={{fontFamily:"'Special Elite',monospace",textTransform:'uppercase',letterSpacing:2,fontSize:13,color:'var(--ink-mid)'}}>Tonight's Dinner</div>
+            <button className="btn btn-primary" onClick={onStartCook}>▶ Start Cooking</button>
+          </div>
+          <div style={{padding:'16px 24px',display:'flex',gap:16,flexWrap:'wrap',borderBottom:'1px solid var(--parchment-dark)'}}>
+            {selectedRecipes.map((r,i)=>(
+              <div key={r.id} style={{display:'flex',alignItems:'center',gap:10}}>
+                {r.photo
+                  ? <img src={r.photo} alt={r.title} style={{width:44,height:44,borderRadius:'50%',objectFit:'cover',border:`3px solid ${COLORS[i%COLORS.length]}`}} />
+                  : <div style={{width:44,height:44,borderRadius:'50%',background:COLORS[i%COLORS.length]+'33',border:`3px solid ${COLORS[i%COLORS.length]}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>{recipeEmoji(r)}</div>
+                }
+                <div><div style={{fontSize:13,fontWeight:700}}>{r.title}</div><div style={{fontSize:11,color:'var(--ink-light)'}}>{r.steps.length} steps</div></div>
+              </div>
+            ))}
+          </div>
+          <div style={{padding:'0 24px 24px'}}>
+            <div className="detail-section-title">Interleaved Step Preview</div>
+            <div className="orch-timeline">
+              {buildPreview(selectedRecipes).map((s,i)=>(
+                <div key={i} className="orch-entry">
+                  <div className="orch-badge" style={{background:s.color,fontSize:11}}>{s.stepNum}</div>
+                  <div><div className="orch-recipe-name" style={{color:s.color}}>{s.recipe}</div><div className="orch-step-text">{s.text}</div></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {selection.length===1 && <div className="empty-state"><p>Select one more dish to start the Dinner Orchestrator.</p></div>}
+      {selection.length===0 && <div className="empty-state"><div className="empty-icon">🍽</div><div className="empty-title">No dishes selected</div><p>Pick 2 or more recipes above to plan your dinner.</p></div>}
+    </div>
+  );
+}
+
+// ── AI Discovery ───────────────────────────────────────────────────────────
+function DiscoverTab({recipes,onAddRecipe}) {
+  const [messages,setMessages] = useState([{role:"assistant",text:"Hello! I'm your kitchen AI. Tell me what you're craving, what ingredients you have, or ask me to suggest something. I can generate full recipes with nutrition info for you to save."}]);
+  const [input,setInput] = useState("");
+  const [loading,setLoading] = useState(false);
+  const [pendingRecipe,setPendingRecipe] = useState(null);
+  const msgsRef = useRef(null);
+  useEffect(()=>{ if(msgsRef.current) msgsRef.current.scrollTop=msgsRef.current.scrollHeight; },[messages]);
+  const savedTitles = recipes.map(r=>r.title).join(", ");
+  async function sendMessage() {
+    if(!input.trim()||loading) return;
+    const userMsg = input.trim(); setInput(""); setMessages(m=>[...m,{role:"user",text:userMsg}]); setLoading(true);
+    const sys = `You are a helpful culinary assistant. Saved recipes: ${savedTitles||"none"}.
+When generating a recipe output ONLY JSON (no markdown):
+{"type":"recipe","recipe":{"title":"","cuisine":"","servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"ingredients":[],"steps":[]}}
+diets from: Vegetarian,Vegan,Gluten-Free,Dairy-Free,Keto,Paleo,Nut-Free,Low-Carb,Low-Fat.
+Otherwise respond in plain text.`;
+    try {
+      const hist = messages.map(m=>({role:m.role==="assistant"?"assistant":"user",content:m.text}));
+      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[...hist,{role:"user",content:userMsg}]})});
+      const data = await res.json();
+      const text = data.content?.map(b=>b.text||"").join("")||"Sorry, I had trouble.";
+      let parsed=null; try { parsed=JSON.parse(text.replace(/```json|```/g,"").trim()); if(parsed.type!=="recipe") parsed=null; } catch {}
+      if(parsed?.recipe) { const nr={...parsed.recipe,id:uid(),aiGenerated:true,photo:null}; setPendingRecipe(nr); setMessages(m=>[...m,{role:"assistant",text:`Generated **${nr.title}**! Save it to your library?`}]); }
+      else setMessages(m=>[...m,{role:"assistant",text}]);
+    } catch { setMessages(m=>[...m,{role:"assistant",text:"Sorry, error. Please try again."}]); }
+    finally { setLoading(false); }
+  }
+  return (
+    <div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>AI Recipe Discovery</div>
+      <p className="text-muted" style={{marginBottom:20}}>Ask for suggestions or generate full recipes with nutrition info.</p>
+      <div className="ai-panel">
+        <div className="ai-messages" ref={msgsRef}>
+          {messages.map((m,i)=><div key={i} className={`ai-msg ${m.role}`}>{m.text}</div>)}
+          {loading && <div className="ai-msg assistant loading">Thinking…</div>}
+        </div>
+        {pendingRecipe && (
+          <div style={{background:'var(--parchment-dark)',borderRadius:4,padding:16,marginBottom:16}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,marginBottom:4}}>{pendingRecipe.title}</div>
+            <div style={{fontSize:12,color:'var(--ink-light)',marginBottom:6}}>{pendingRecipe.calories&&`🔥 ${pendingRecipe.calories} cal · `}{pendingRecipe.protein&&`${pendingRecipe.protein}g protein`}</div>
+            <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>{(pendingRecipe.diets||[]).map(d=><span key={d} className="diet-badge">{d}</span>)}</div>
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn btn-primary btn-sm" onClick={()=>{onAddRecipe(pendingRecipe);setPendingRecipe(null);setMessages(m=>[...m,{role:"assistant",text:`✓ "${pendingRecipe.title}" saved! You can add a photo from the Library.`}]);}}>Save to Library</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setPendingRecipe(null)}>Dismiss</button>
+            </div>
+          </div>
+        )}
+        <div className="ai-input-row">
+          <input className="ai-input" placeholder="e.g. 'I have chicken and lemon' or 'Generate a keto dinner'" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMessage()} />
+          <button className="btn btn-primary" onClick={sendMessage} disabled={loading}>Send</button>
+        </div>
+        <div style={{marginTop:12,display:'flex',gap:8,flexWrap:'wrap'}}>
+          {["Suggest something quick","I have eggs, cheese, and spinach","Generate a keto dinner","What pairs well with carbonara?"].map(s=>(
+            <button key={s} className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setInput(s)}>{s}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Stashcook parser ───────────────────────────────────────────────────────
+function parseStashcook(text) {
+  try {
+    const lines = text.split("\n").map(l=>l.trim()); let i=0;
+    while(i<lines.length && !lines[i]) i++;
+    const title = lines[i++]; if(!title) return null;
+    let cookTime=0,servings=4;
+    while(i<lines.length && lines[i] && !lines[i].match(/^\d/) && !lines[i].match(/^Shared/i)) {
+      const t=lines[i].match(/Time:\s*(\d+)/i); if(t) cookTime=parseInt(t[1]);
+      const s=lines[i].match(/Servings?:\s*(\d+)/i); if(s) servings=parseInt(s[1]);
+      i++;
+    }
+    while(i<lines.length && !lines[i]) i++;
+    const ingredients=[]; while(i<lines.length) { const l=lines[i]; if(!l){i++;break;} if(l.match(/^\d+\./)||l.match(/^Shared/i)) break; ingredients.push(l); i++; }
+    while(i<lines.length && !lines[i]) i++;
+    const steps=[]; let cur="";
+    while(i<lines.length) {
+      const l=lines[i];
+      if(l.match(/^Shared via/i)||l.match(/^Stash\./i)){i++;continue;}
+      const n=l.match(/^(\d+)\.\s+(.*)/);
+      if(n){if(cur)steps.push(cur.trim());cur=n[2];}
+      else if(l&&cur) cur+=" "+l;
+      else if(!l&&cur){steps.push(cur.trim());cur="";}
+      i++;
+    }
+    if(cur.trim()) steps.push(cur.trim());
+    if(!title||!ingredients.length||!steps.length) return null;
+    return {id:uid(),title,cuisine:"",servings,prepTime:0,cookTime,description:"",tags:["imported","stashcook"],diets:[],calories:null,protein:null,carbs:null,fat:null,fiber:null,photo:null,ingredients,steps};
+  } catch { return null; }
+}
+
+// ── Import Tab ─────────────────────────────────────────────────────────────
+function ImportTab({onImport}) {
+  const [mode,setMode] = useState("stashcook");
+  const [pasteText,setPasteText] = useState("");
+  const [urlInput,setUrlInput] = useState("");
+  const [loading,setLoading] = useState(false);
+  const [result,setResult] = useState(null);
+  const [error,setError] = useState("");
+  const [imported,setImported] = useState([]);
+  function handleStashcookParse() { setError("");setResult(null); const r=parseStashcook(pasteText); if(r)setResult(r); else setError("Couldn't parse. Make sure it's a full Stashcook share."); }
+  async function handleAIParse(inputText,isUrl) {
+    setError("");setResult(null);setLoading(true);
+    try {
+      const prompt = `Parse this ${isUrl?"recipe URL":"recipe text"} into structured JSON:\n${inputText}\n\nReturn ONLY JSON:\n{"title":"","cuisine":"","servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":null,"protein":null,"carbs":null,"fat":null,"fiber":null,"ingredients":[],"steps":[]}`;
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+      const data=await res.json();
+      const parsed=JSON.parse(data.content?.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim());
+      if(!parsed.title||!parsed.steps?.length) throw new Error();
+      setResult({...parsed,id:uid(),tags:[...(parsed.tags||[]),"imported"],photo:null});
+    } catch { setError("Couldn't parse. Try paste mode or check the URL is public."); }
+    finally { setLoading(false); }
+  }
+  function saveResult() { if(!result) return; onImport(result); setImported(p=>[...p,result.title]); setResult(null); setPasteText(""); setUrlInput(""); }
+  return (
+    <div>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>Import Recipes</div>
+      <p className="text-muted" style={{marginBottom:24}}>Bring in recipes from Stashcook, a URL, or any copied text. Add photos after saving.</p>
+      <div style={{display:'flex',gap:8,marginBottom:24,flexWrap:'wrap'}}>
+        {[["stashcook","📲 Stashcook Share"],["url","🔗 From URL"],["text","📋 Paste Any Recipe"]].map(([id,label])=>(
+          <button key={id} className={`btn ${mode===id?"btn-primary":"btn-outline"} btn-sm`} onClick={()=>{setMode(id);setResult(null);setError("");}}>{label}</button>
+        ))}
+      </div>
+      <div className="ai-panel">
+        {mode==="stashcook" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>In Stashcook: open recipe → <strong>Share</strong> → <strong>Share as text</strong>. Paste below.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontFamily:'monospace',fontSize:13}} placeholder="Classic Steakhouse Mustard Sauce..." value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={handleStashcookParse} disabled={!pasteText.trim()}>Parse Recipe</button></div>)}
+        {mode==="url" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe URL. AI will extract and estimate nutrition.</p><div className="ai-input-row" style={{marginBottom:8}}><input className="ai-input" placeholder="https://..." value={urlInput} onChange={e=>{setUrlInput(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(urlInput,true)} disabled={!urlInput.trim()||loading}>{loading?"…":"Import"}</button></div><p className="text-muted">Paywalled sites may not work.</p></div>)}
+        {mode==="text" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe text. AI will structure it.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontSize:13}} placeholder="Paste recipe in any format…" value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(pasteText,false)} disabled={!pasteText.trim()||loading}>{loading?"Parsing…":"Parse with AI"}</button></div>)}
+        {error && <div style={{marginTop:16,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {error}</div>}
+        {result && (
+          <div style={{marginTop:20,background:'var(--parchment-dark)',borderRadius:4,padding:20}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,marginBottom:6}}>{result.title}</div>
+            <div style={{fontSize:13,color:'var(--ink-light)',display:'flex',gap:16,flexWrap:'wrap',marginBottom:8}}>
+              {result.cuisine&&<span>🌍 {result.cuisine}</span>}{(result.prepTime||result.cookTime)?<span>⏱ {(result.prepTime||0)+(result.cookTime||0)} min</span>:null}{result.servings&&<span>👤 {result.servings}</span>}{result.calories&&<span>🔥 {result.calories} cal</span>}
+              <span>📝 {result.ingredients?.length} ingredients · {result.steps?.length} steps</span>
+            </div>
+            {(result.diets||[]).length>0 && <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>{result.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
+            <div style={{display:'flex',gap:8}}><button className="btn btn-primary btn-sm" onClick={saveResult}>✓ Save to Library</button><button className="btn btn-ghost btn-sm" onClick={()=>setResult(null)}>Discard</button></div>
+          </div>
+        )}
+        {imported.length>0 && <div style={{marginTop:20,borderTop:'1px solid var(--parchment-dark)',paddingTop:16}}><div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--sage)',marginBottom:8}}>✓ Imported this session</div>{imported.map((t,i)=><div key={i} style={{fontSize:13,padding:'3px 0',color:'var(--ink-mid)'}}>{t}</div>)}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Recipe Modal (Add / Edit) ──────────────────────────────────────────────
+function RecipeModal({recipe,onSave,onClose}) {
+  const blank = {id:uid(),title:"",cuisine:"",servings:4,prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
+  const [form,setForm] = useState(recipe ? {
+    ...recipe,
+    tags: Array.isArray(recipe.tags)?recipe.tags.join(", "):recipe.tags||"",
+    ingredients: Array.isArray(recipe.ingredients)?recipe.ingredients.join("\n"):recipe.ingredients||"",
+    steps: Array.isArray(recipe.steps)?recipe.steps.join("\n"):recipe.steps||"",
+    diets: recipe.diets||[],
+    calories:recipe.calories||"",protein:recipe.protein||"",carbs:recipe.carbs||"",
+    fat:recipe.fat||"",fiber:recipe.fiber||"",sugar:recipe.sugar||"",sodium:recipe.sodium||"",
+    photo:recipe.photo||null,
+  } : blank);
+
+  function set(k,v){setForm(f=>({...f,[k]:v}));}
+  function toggleDiet(d){setForm(f=>({...f,diets:f.diets.includes(d)?f.diets.filter(x=>x!==d):[...f.diets,d]}));}
+  function handleSave() {
+    const r={
+      ...form,
+      servings:+form.servings||4, prepTime:+form.prepTime||0, cookTime:+form.cookTime||0,
+      calories:form.calories?+form.calories:null, protein:form.protein?+form.protein:null,
+      carbs:form.carbs?+form.carbs:null, fat:form.fat?+form.fat:null,
+      fiber:form.fiber?+form.fiber:null, sugar:form.sugar?+form.sugar:null, sodium:form.sodium?+form.sodium:null,
+      tags:form.tags.split(",").map(t=>t.trim()).filter(Boolean),
+      ingredients:form.ingredients.split("\n").map(s=>s.trim()).filter(Boolean),
+      steps:form.steps.split("\n").map(s=>s.trim()).filter(Boolean),
+    };
+    if(!r.title) return;
+    onSave(r);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-title">{recipe?"Edit Recipe":"New Recipe"}</div>
+
+        <div className="form-section">Photo</div>
+        <div className="form-group">
+          <PhotoUpload value={form.photo} onChange={v=>set("photo",v)} />
+        </div>
+
+        <div className="form-section">Details</div>
+        <div className="form-group"><label className="form-label">Recipe Title *</label><input className="form-input" value={form.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Spaghetti Carbonara" /></div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Cuisine</label><input className="form-input" value={form.cuisine} onChange={e=>set("cuisine",e.target.value)} placeholder="Italian, Thai…" /></div>
+          <div className="form-group"><label className="form-label">Servings</label><input className="form-input" type="number" value={form.servings} onChange={e=>set("servings",e.target.value)} /></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Prep Time (min)</label><input className="form-input" type="number" value={form.prepTime} onChange={e=>set("prepTime",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Cook Time (min)</label><input className="form-input" type="number" value={form.cookTime} onChange={e=>set("cookTime",e.target.value)} /></div>
+        </div>
+        <div className="form-group"><label className="form-label">Description</label><textarea className="form-input form-textarea" value={form.description} onChange={e=>set("description",e.target.value)} placeholder="A short description of the dish" /></div>
+        <div className="form-group"><label className="form-label">Tags (comma separated)</label><input className="form-input" value={form.tags} onChange={e=>set("tags",e.target.value)} placeholder="quick, pasta, weeknight…" /></div>
+
+        <div className="form-section">Diet Labels</div>
+        <div className="checkbox-group">{["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Nut-Free","Low-Carb","Low-Fat","Halal","Kosher"].map(d=><label key={d} className="checkbox-label"><input type="checkbox" checked={form.diets.includes(d)} onChange={()=>toggleDiet(d)} />{d}</label>)}</div>
+
+        <div className="form-section">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:"none",letterSpacing:0,color:"var(--ink-light)"}}>per serving (optional)</span></div>
+        <div className="form-row-3">
+          <div className="form-group"><label className="form-label">Calories</label><input className="form-input" type="number" value={form.calories} onChange={e=>set("calories",e.target.value)} placeholder="kcal" /></div>
+          <div className="form-group"><label className="form-label">Protein (g)</label><input className="form-input" type="number" value={form.protein} onChange={e=>set("protein",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Carbs (g)</label><input className="form-input" type="number" value={form.carbs} onChange={e=>set("carbs",e.target.value)} /></div>
+        </div>
+        <div className="form-row-3">
+          <div className="form-group"><label className="form-label">Fat (g)</label><input className="form-input" type="number" value={form.fat} onChange={e=>set("fat",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Fiber (g)</label><input className="form-input" type="number" value={form.fiber} onChange={e=>set("fiber",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Sugar (g)</label><input className="form-input" type="number" value={form.sugar} onChange={e=>set("sugar",e.target.value)} /></div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Sodium (mg)</label><input className="form-input" type="number" value={form.sodium} onChange={e=>set("sodium",e.target.value)} /></div>
+        </div>
+
+        <div className="form-section">Recipe</div>
+        <div className="form-group">
+          <label className="form-label">Ingredients (one per line)</label>
+          <textarea className="form-input form-textarea" style={{minHeight:110}} value={form.ingredients} onChange={e=>set("ingredients",e.target.value)} placeholder={"400g spaghetti\n4 egg yolks\n2 tbsp olive oil\n..."} />
+          <div style={{fontSize:11,color:"var(--ink-light)",marginTop:4}}>Tip: include amounts for scaling to work</div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Steps (one per line)</label>
+          <textarea className="form-input form-textarea" style={{minHeight:130}} value={form.steps} onChange={e=>set("steps",e.target.value)} placeholder={"Bring water to boil.\nAdd pasta and cook al dente.\n..."} />
+        </div>
+        <div className="flex gap-8 mt-16">
+          <button className="btn btn-primary" onClick={handleSave}>Save Recipe</button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<RecipeBook />);
+  </script>
+</body>
+</html>
