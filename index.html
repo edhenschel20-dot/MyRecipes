@@ -904,22 +904,20 @@ function DiscoverTab({recipes,onAddRecipe}) {
   // Prompt 1: Generate 5 ideas
   function buildIdeasPrompt(batch) {
     const c = getContext();
-    const batchNote = batch > 1 ? `\nI already saw ${(batch-1)*5} suggestions and didn't like them. Give me ${batch*5-((batch-1)*5)} completely different ideas.` : "";
-    return `You are an expert culinary assistant.
-${c.existing}
-I am looking for recipe ideas with these criteria:
+    const batchNote = batch > 1 ? ` I already saw ${(batch-1)*5} suggestions and want ${5} completely different ideas.` : "";
+    return `IMPORTANT: Your entire response must be a single valid JSON array. Do not write any explanation, greeting, markdown, code blocks, or text of any kind before or after the JSON. Start your response with [ and end with ].${batchNote}
+
+Generate exactly 5 recipe ideas matching these criteria:
 - Main ingredient: ${c.protein}
 - Cooking method: ${c.cooker}
 - Flavor profile: ${c.flavors}
 - Occasion: ${c.occasion}
 - Servings: ${c.servings}
-${c.notes ? `- Extra notes: ${c.notes}` : ""}${batchNote}
+${c.notes ? `- Notes: ${c.notes}` : ""}
+${c.existing}
 
-Give me exactly 5 different recipe ideas. Reply with ONLY a JSON array, no markdown, no text before or after:
-[
-  {"title":"Recipe Name","description":"2-3 sentence description of what makes it special and how it's cooked"},
-  ...
-]`;
+Return this exact format with 5 items:
+[{"title":"Name of Recipe","description":"2-3 sentences about what makes it special and how it is cooked"},{"title":"...","description":"..."},{"title":"...","description":"..."},{"title":"...","description":"..."},{"title":"...","description":"..."}]`;
   }
 
   // Prompt 2: Full recipe for chosen idea
@@ -951,11 +949,21 @@ Diets from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, L
   function parseIdeas() {
     setIdeasError(""); setIdeas([]);
     try {
-      const clean = ideasPasteText.replace(/```json|```/g,"").trim();
+      // Strip markdown code blocks
+      let clean = ideasPasteText.replace(/```json|```/g,"").trim();
+      // Extract just the JSON array even if Claude added surrounding text
+      const arrStart = clean.indexOf("[");
+      const arrEnd = clean.lastIndexOf("]");
+      if(arrStart !== -1 && arrEnd !== -1) clean = clean.slice(arrStart, arrEnd+1);
       const parsed = JSON.parse(clean);
       if(!Array.isArray(parsed)||!parsed.length) throw new Error();
-      setIdeas(parsed);
-    } catch { setIdeasError("Could not parse. Make sure you copied the full JSON array from Claude."); }
+      // Normalise — handle both {title,description} and flat strings
+      const normalised = parsed.map(item => typeof item === "string"
+        ? {title:item, description:""}
+        : {title:item.title||item.name||"Untitled", description:item.description||item.desc||""}
+      );
+      setIdeas(normalised);
+    } catch { setIdeasError("Could not parse. Paste only Claude's response — it should start with [ and end with ]"); }
   }
 
   function parseRecipe() {
