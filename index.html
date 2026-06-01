@@ -161,6 +161,10 @@ const STYLES = `
   .cook-step-num { font-family: 'Special Elite', monospace; font-size: 64px; color: rgba(255,255,255,0.08); line-height: 1; margin-bottom: 8px; }
   .cook-recipe-label { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--saffron); margin-bottom: 16px; font-weight: 700; }
   .cook-step-text { font-family: 'Playfair Display', serif; font-size: clamp(20px,3.5vw,32px); line-height: 1.5; max-width: 700px; }
+  .cook-ingredients { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 24px; max-width: 700px; }
+  .cook-ing-chip { background: rgba(240,184,75,0.15); border: 1px solid rgba(240,184,75,0.4); border-radius: 20px; padding: 6px 14px; font-size: 13px; color: var(--saffron-light); display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .cook-ing-amount { font-family: 'Special Elite', monospace; font-size: 15px; color: var(--saffron-light); font-weight: 700; }
+  .cook-ing-name { font-size: 12px; color: rgba(255,255,255,0.6); }
   .cook-nav { display: flex; gap: 20px; align-items: center; padding: 24px; justify-content: center; }
   .cook-nav-btn { padding: 14px 32px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; border-radius: 3px; cursor: pointer; border: 2px solid; }
   .cook-prev { background: none; border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.6); }
@@ -419,12 +423,15 @@ function RecipeBook() {
   });
 
   function startCookMode(recipe) {
-    setCookMode({ recipe, steps: recipe.steps.map((s,i)=>({text:s,num:i+1,recipe:recipe.title,photo:recipe.photo})), currentIndex:0 });
+    setCookMode({ recipe, steps: recipe.steps.map((s,i)=>({
+      text:s, num:i+1, recipe:recipe.title, photo:recipe.photo,
+      matchedIngs: matchIngredients(s, recipe.ingredients)
+    })), currentIndex:0 });
   }
   function buildDinnerSteps(ids) {
     const sel = ids.map(id=>recipes.find(r=>r.id===id)).filter(Boolean);
     const colorMap = {}; sel.forEach((r,i)=>{colorMap[r.id]=COLORS[i%COLORS.length];});
-    const all = []; sel.forEach(r=>{ r.steps.forEach((text,idx)=>{ all.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,totalSteps:r.steps.length,globalOrder:idx/r.steps.length,photo:r.photo}); }); });
+    const all = []; sel.forEach(r=>{ r.steps.forEach((text,idx)=>{ all.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,totalSteps:r.steps.length,globalOrder:idx/r.steps.length,photo:r.photo,matchedIngs:matchIngredients(text,r.ingredients)}); }); });
     all.sort((a,b)=>a.globalOrder-b.globalOrder || sel.findIndex(r=>r.id===a.recipeId)-sel.findIndex(r=>r.id===b.recipeId));
     return all;
   }
@@ -609,6 +616,38 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox}) {
   );
 }
 
+// ── Ingredient matcher ────────────────────────────────────────────────────
+function extractKeywords(ing) {
+  let s = ing.replace(/^[\d\s/½⅓⅔¼¾⅛.]+/, "");
+  s = s.replace(/\b(tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|whole|large|medium|small|fresh|dried|finely|chopped|diced|minced|grated|sliced|boneless|skinless)\b/gi, "");
+  s = s.replace(/[,(].*/, ""); // drop parenthetical notes
+  return s.split(/\s+/).map(w=>w.toLowerCase().trim()).filter(w=>w.length>2);
+}
+
+function parseIngAmount(ing) {
+  // Return { amount: "2 tbsp", name: "Butter" }
+  const frac = {"½":"1/2","⅓":"1/3","⅔":"2/3","¼":"1/4","¾":"3/4","⅛":"1/8"};
+  let s = ing.trim();
+  Object.entries(frac).forEach(([k,v])=>{ s=s.replace(k,v); });
+  const units = "tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|pinches|whole|large|medium|small|cloves?|heads?|bunch|bunches|pieces?|slices?|strips?|cans?|jars?";
+  const re = new RegExp(`^([\d\s/.-]+(?:${units})?)\s*(.*)$`,"i");
+  const m = s.match(re);
+  if(m) return { amount: m[1].trim(), name: m[2].replace(/^[,\s]+/,"").trim() };
+  return { amount: "", name: ing };
+}
+
+function matchIngredients(stepText, ingredients) {
+  const stepLower = stepText.toLowerCase();
+  return (ingredients||[]).filter(ing => {
+    const keywords = extractKeywords(ing);
+    return keywords.some(kw => {
+      // Match whole word to avoid "egg" matching "eggplant" etc
+      const re = new RegExp(`\\b${kw}`, "i");
+      return re.test(stepLower);
+    });
+  });
+}
+
 // ── Cook Mode ──────────────────────────────────────────────────────────────
 function CookModeOverlay({steps,currentIndex,onNav,onClose,isDinner}) {
   const step = steps[currentIndex];
@@ -641,6 +680,19 @@ function CookModeOverlay({steps,currentIndex,onNav,onClose,isDinner}) {
         <div className="cook-step-num">{step.num||(currentIndex+1)}</div>
         {isDinner && <div className="cook-recipe-label" style={{color:step.color||'var(--saffron)'}}>{step.recipe}</div>}
         <div className="cook-step-text">{step.text}</div>
+        {step.matchedIngs && step.matchedIngs.length > 0 && (
+          <div className="cook-ingredients">
+            {step.matchedIngs.map((ing,i) => {
+              const {amount, name} = parseIngAmount(ing);
+              return (
+                <div key={i} className="cook-ing-chip">
+                  {amount && <span className="cook-ing-amount">{amount}</span>}
+                  <span className="cook-ing-name">{name}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div className="cook-nav">
         <button className="cook-nav-btn cook-prev" onClick={()=>onNav(-1)} style={{opacity:currentIndex===0?0.3:1}}>← Prev</button>
