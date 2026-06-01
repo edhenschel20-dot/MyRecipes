@@ -217,6 +217,18 @@ const STYLES = `
   .mt-16 { margin-top: 16px; }
   .text-muted { color: var(--ink-light); font-size: 13px; }
   .color-swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+  /* Share/Sync modal */
+  .sync-modal { background: var(--cream); border-radius: 6px; padding: 28px; max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 6px 6px 0 rgba(26,20,16,0.2); }
+  .sync-option { background: white; border: 1px solid var(--parchment-dark); border-radius: 4px; padding: 20px; margin-bottom: 12px; }
+  .sync-option-title { font-family: 'Playfair Display', serif; font-size: 17px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .sync-option-desc { font-size: 13px; color: var(--ink-light); line-height: 1.5; margin-bottom: 14px; }
+  .sync-textarea { width: 100%; min-height: 100px; padding: 10px; font-family: monospace; font-size: 12px; border: 1px solid var(--parchment-dark); background: var(--parchment); border-radius: 3px; resize: vertical; color: var(--ink); }
+  .sync-status { font-size: 13px; margin-top: 8px; min-height: 20px; }
+  .sync-status.ok { color: var(--sage); font-weight: 700; }
+  .sync-status.err { color: var(--rust); font-weight: 700; }
+  .btn-header { padding: 8px 16px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border-radius: 3px; border: 2px solid; background: none; color: var(--ink); border-color: var(--ink); transition: all 0.15s; }
+  .btn-header:hover { background: var(--ink); color: var(--cream); }
 `;
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -374,6 +386,7 @@ function RecipeBook() {
   const [filterTag, setFilterTag] = useState("");
   const [filterDiet, setFilterDiet] = useState("");
   const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [showSync, setShowSync] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [cookMode, setCookMode] = useState(null);
@@ -421,7 +434,10 @@ function RecipeBook() {
             <div className="header-title">The <span>Recipe</span> Book</div>
             <div className="header-sub">your kitchen, organized & intelligently guided</div>
           </div>
-          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Recipe</button>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button className="btn-header" onClick={()=>setShowSync(true)}>⇅ Share Recipes</button>
+            <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Recipe</button>
+          </div>
         </header>
         <nav className="nav-tabs">
           {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"]].map(([id,label])=>(
@@ -436,6 +452,16 @@ function RecipeBook() {
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{upsertRecipe(r);setShowAdd(false);setEditRecipe(null);}} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
       {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
       {dinnerCookMode && <CookModeOverlay steps={dinnerCookMode.steps} currentIndex={dinnerCookMode.currentIndex} onNav={dir=>setDinnerCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setDinnerCookMode(null)} isDinner />}
+      {showSync && <SyncModal data={data} onImport={imported=>{
+        // Merge: add recipes not already present by id
+        setData(d=>{
+          const existingIds = new Set(d.recipes.map(r=>r.id));
+          const newRecipes = imported.filter(r=>!existingIds.has(r.id));
+          return {...d, recipes:[...d.recipes, ...newRecipes]};
+        });
+      }} onReplace={imported=>{
+        setData(d=>({...d, recipes:imported}));
+      }} onClose={()=>setShowSync(false)} />}
       {lightbox && <div className="lightbox" onClick={()=>setLightbox(null)}><button className="lightbox-close" onClick={()=>setLightbox(null)}>✕</button><img src={lightbox} alt="Recipe" onClick={e=>e.stopPropagation()} /></div>}
     </>
   );
@@ -920,6 +946,153 @@ function RecipeModal({recipe,onSave,onClose}) {
     </div>
   );
 }
+
+// ── Sync / Share Modal ─────────────────────────────────────────────────────
+function SyncModal({ data, onImport, onReplace, onClose }) {
+  const [importText, setImportText] = useState("");
+  const [importStatus, setImportStatus] = useState("");
+  const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Build export JSON (exclude photo data for a lean share, include for full backup)
+  function buildExport(includePhotos) {
+    const recipes = includePhotos ? data.recipes : data.recipes.map(r=>({...r, photo:null}));
+    return JSON.stringify({ version: 1, exported: new Date().toISOString(), recipes }, null, 2);
+  }
+
+  function downloadFile(content, filename) {
+    const blob = new Blob([content], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for Android
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  function handleImportText(text, replace) {
+    setImportStatus("");
+    try {
+      const parsed = JSON.parse(text.trim());
+      const recipes = parsed.recipes || (Array.isArray(parsed) ? parsed : null);
+      if (!recipes || !recipes.length) throw new Error("No recipes found");
+      // Assign new IDs to avoid collisions
+      const withNewIds = recipes.map(r => ({ ...r, id: r.id || uid() }));
+      if (replace) {
+        if (!window.confirm(`Replace ALL your recipes with ${withNewIds.length} imported recipe(s)? This cannot be undone.`)) return;
+        onReplace(withNewIds);
+      } else {
+        onImport(withNewIds);
+      }
+      setImportStatus(`ok:${replace ? "Replaced" : "Merged"} ${withNewIds.length} recipe(s) successfully!`);
+      setImportText("");
+    } catch (e) {
+      setImportStatus("err:Invalid JSON. Make sure you pasted the full export text.");
+    }
+  }
+
+  function handleFileImport(e, replace) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => handleImportText(ev.target.result, replace);
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  const statusParts = importStatus.split(":");
+  const statusType = statusParts[0];
+  const statusMsg = statusParts.slice(1).join(":");
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="sync-modal">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
+          <div className="modal-title" style={{marginBottom:0}}>⇅ Share Recipes</div>
+          <button className="btn-icon" style={{fontSize:22}} onClick={onClose}>✕</button>
+        </div>
+
+        {/* Export section */}
+        <div className="sync-option">
+          <div className="sync-option-title">📤 Export Your Recipes</div>
+          <div className="sync-option-desc">
+            Download or copy your recipe collection to share with your wife or keep as a backup.
+            "Without photos" creates a much smaller file — good for texting or email.
+          </div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button className="btn btn-primary btn-sm" onClick={()=>downloadFile(buildExport(false), `recipes-${new Date().toISOString().slice(0,10)}.json`)}>
+              ⬇ Download (no photos)
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={()=>downloadFile(buildExport(true), `recipes-full-${new Date().toISOString().slice(0,10)}.json`)}>
+              ⬇ Download (with photos)
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>copyToClipboard(buildExport(false))}>
+              {copied ? "✓ Copied!" : "📋 Copy to clipboard"}
+            </button>
+          </div>
+          <div style={{fontSize:12,color:'var(--ink-light)',marginTop:10}}>
+            {data.recipes.length} recipe{data.recipes.length!==1?"s":""} in your library
+          </div>
+        </div>
+
+        {/* Import section */}
+        <div className="sync-option">
+          <div className="sync-option-title">📥 Import Recipes</div>
+          <div className="sync-option-desc">
+            Paste JSON from someone else's export, or load a .json file. 
+            <strong> Merge</strong> adds new recipes without touching yours.
+            <strong> Replace</strong> overwrites everything.
+          </div>
+
+          {/* File import — label-wrapped for Android */}
+          <div style={{marginBottom:12}}>
+            <label style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',background:'var(--parchment-dark)',border:'1px solid var(--parchment-dark)',borderRadius:3,cursor:'pointer',fontSize:13,fontWeight:700}}>
+              <input ref={fileInputRef} type="file" accept=".json,application/json" style={{width:'0.1px',height:'0.1px',opacity:0,position:'absolute',zIndex:-1}} onChange={e=>handleFileImport(e,false)} />
+              📂 Load from file (merge)
+            </label>
+            <label style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',background:'var(--parchment-dark)',border:'1px solid var(--parchment-dark)',borderRadius:3,cursor:'pointer',fontSize:13,fontWeight:700,marginLeft:8}}>
+              <input type="file" accept=".json,application/json" style={{width:'0.1px',height:'0.1px',opacity:0,position:'absolute',zIndex:-1}} onChange={e=>handleFileImport(e,true)} />
+              📂 Load from file (replace)
+            </label>
+          </div>
+
+          <textarea
+            className="sync-textarea"
+            placeholder='Or paste JSON here — e.g. {"version":1,"recipes":[...]}'
+            value={importText}
+            onChange={e=>{setImportText(e.target.value);setImportStatus("");}}
+          />
+          <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
+            <button className="btn btn-primary btn-sm" onClick={()=>handleImportText(importText,false)} disabled={!importText.trim()}>Merge</button>
+            <button className="btn btn-danger btn-sm" onClick={()=>handleImportText(importText,true)} disabled={!importText.trim()}>Replace All</button>
+          </div>
+          {importStatus && <div className={`sync-status ${statusType}`}>{statusMsg}</div>}
+        </div>
+
+        <div style={{fontSize:12,color:'var(--ink-light)',marginTop:4,lineHeight:1.6}}>
+          💡 Tip: To sync with your wife, one of you exports and the other imports using Merge. 
+          Do this whenever you add new recipes to keep both libraries in sync.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<RecipeBook />);
