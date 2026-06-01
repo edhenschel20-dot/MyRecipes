@@ -800,13 +800,10 @@ function DiscoverTab({recipes,onAddRecipe}) {
 
 My request: ${req}
 
-Reply with ONLY a JSON object — no markdown, no explanation before or after:
-{"title":"","cuisine":"","categories":[],"servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"ingredients":[],"steps":[]}
-
-categories pick from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
-diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat
-ingredients: include amounts e.g. "2 tbsp butter", "400g pasta"
-steps: clear numbered instructions as an array of strings`;
+Reply with ONLY a valid JSON object. No markdown, no text before or after.
+Fields required: title, cuisine, categories (array), servings, prepTime, cookTime, description, tags (array), diets (array), calories, protein, carbs, fat, fiber, ingredients (array of strings with amounts), steps (array of strings).
+Categories pick from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
+Diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat`;
   }
 
   async function copyPrompt() {
