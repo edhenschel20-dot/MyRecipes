@@ -417,7 +417,7 @@ function RecipeBook() {
     // If we're viewing this recipe, refresh it
     if (selectedRecipe?.id === r.id) setSelectedRecipe(r);
   }
-  function deleteRecipe(id) { setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
+  function deleteRecipe(id) { if(!window.confirm('Delete this recipe? This cannot be undone.')) return; setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
 
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
@@ -786,61 +786,142 @@ function DinnerTab({recipes,selection,setSelection,onStartCook}) {
 
 // ── AI Discovery ───────────────────────────────────────────────────────────
 function DiscoverTab({recipes,onAddRecipe}) {
-  const [messages,setMessages] = useState([{role:"assistant",text:"Hello! I'm your kitchen AI. Tell me what you're craving, what ingredients you have, or ask me to suggest something. I can generate full recipes with nutrition info for you to save."}]);
-  const [input,setInput] = useState("");
-  const [loading,setLoading] = useState(false);
-  const [pendingRecipe,setPendingRecipe] = useState(null);
-  const msgsRef = useRef(null);
-  useEffect(()=>{ if(msgsRef.current) msgsRef.current.scrollTop=msgsRef.current.scrollHeight; },[messages]);
+  const [request, setRequest] = useState("");
+  const [pasteText, setPasteText] = useState("");
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [savedList, setSavedList] = useState([]);
+
   const savedTitles = recipes.map(r=>r.title).join(", ");
-  async function sendMessage() {
-    if(!input.trim()||loading) return;
-    const userMsg = input.trim(); setInput(""); setMessages(m=>[...m,{role:"user",text:userMsg}]); setLoading(true);
-    const sys = `You are a helpful culinary assistant. Saved recipes: ${savedTitles||"none"}.
-When generating a recipe output ONLY JSON (no markdown):
-{"type":"recipe","recipe":{"title":"","cuisine":"","categories":[],"servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"ingredients":[],"steps":[]}}
-diets from: Vegetarian,Vegan,Gluten-Free,Dairy-Free,Keto,Paleo,Nut-Free,Low-Carb,Low-Fat.
-Otherwise respond in plain text.`;
-    try {
-      const hist = messages.map(m=>({role:m.role==="assistant"?"assistant":"user",content:m.text}));
-      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[...hist,{role:"user",content:userMsg}]})});
-      const data = await res.json();
-      const text = data.content?.map(b=>b.text||"").join("")||"Sorry, I had trouble.";
-      let parsed=null; try { parsed=JSON.parse(text.replace(/```json|```/g,"").trim()); if(parsed.type!=="recipe") parsed=null; } catch {}
-      if(parsed?.recipe) { const nr={...parsed.recipe,id:uid(),aiGenerated:true,photo:null}; setPendingRecipe(nr); setMessages(m=>[...m,{role:"assistant",text:`Generated **${nr.title}**! Save it to your library?`}]); }
-      else setMessages(m=>[...m,{role:"assistant",text}]);
-    } catch { setMessages(m=>[...m,{role:"assistant",text:"Sorry, error. Please try again."}]); }
-    finally { setLoading(false); }
+
+  function buildPrompt(req) {
+    return `You are a culinary assistant. My existing recipes: ${savedTitles||"none"}.
+
+My request: ${req}
+
+Reply with ONLY a JSON object — no markdown, no explanation before or after:
+{"title":"","cuisine":"","categories":[],"servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"ingredients":[],"steps":[]}
+
+categories pick from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
+diets pick from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat
+ingredients: include amounts e.g. "2 tbsp butter", "400g pasta"
+steps: clear numbered instructions as an array of strings`;
   }
+
+  async function copyPrompt() {
+    const prompt = buildPrompt(request);
+    try { await navigator.clipboard.writeText(prompt); }
+    catch {
+      const ta = document.createElement("textarea");
+      ta.value = prompt; ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand("copy"); document.body.removeChild(ta);
+    }
+    setCopied(true); setTimeout(()=>setCopied(false), 2500);
+  }
+
+  function openClaude() {
+    const prompt = buildPrompt(request);
+    window.open("https://claude.ai/new?q=" + encodeURIComponent(prompt), "_blank");
+  }
+
+  function parseAndPreview() {
+    setError(""); setResult(null);
+    try {
+      const clean = pasteText.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+      if(!parsed.title||!parsed.steps?.length) throw new Error();
+      setResult({...parsed, id:uid(), aiGenerated:true, photo:null,
+        categories:parsed.categories||[], diets:parsed.diets||[], tags:parsed.tags||[]});
+    } catch {
+      setError("Couldn't parse that. Make sure you copied the full JSON from Claude — it should start with { and end with }");
+    }
+  }
+
+  function saveResult() {
+    if(!result) return;
+    onAddRecipe(result);
+    setSavedList(s=>[...s, result.title]);
+    setResult(null); setPasteText(""); setRequest("");
+  }
+
+  const QUICK = [
+    "A smoked beef recipe — not roast beef, something impressive",
+    "A quick weeknight dinner with chicken and pantry staples",
+    "A show-stopping appetizer for a dinner party",
+    "A hearty soup that reheats well for meal prep",
+  ];
+
   return (
     <div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>AI Recipe Discovery</div>
-      <p className="text-muted" style={{marginBottom:20}}>Ask for suggestions or generate full recipes with nutrition info.</p>
-      <div className="ai-panel">
-        <div className="ai-messages" ref={msgsRef}>
-          {messages.map((m,i)=><div key={i} className={`ai-msg ${m.role}`}>{m.text}</div>)}
-          {loading && <div className="ai-msg assistant loading">Thinking…</div>}
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>✨ AI Recipe Discovery</div>
+      <p className="text-muted" style={{marginBottom:20}}>Describe what you want → open Claude → paste the result back to save it.</p>
+
+      <div className="ai-panel" style={{marginBottom:16}}>
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Step 1 — Describe what you want</div>
+        <textarea
+          className="ai-input"
+          style={{width:'100%',minHeight:90,resize:'vertical',marginBottom:10,padding:12,fontSize:14,borderRadius:3,display:'block'}}
+          placeholder="e.g. Something I can cook on my smoker — a lean beef that's impressive and different from roast beef..."
+          value={request}
+          onChange={e=>setRequest(e.target.value)}
+        />
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
+          {QUICK.map(q=>(
+            <button key={q} className="btn btn-ghost btn-sm" style={{fontSize:11,textAlign:'left'}} onClick={()=>setRequest(q)}>
+              {q.length>44?q.slice(0,44)+"…":q}
+            </button>
+          ))}
         </div>
-        {pendingRecipe && (
-          <div style={{background:'var(--parchment-dark)',borderRadius:4,padding:16,marginBottom:16}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,marginBottom:4}}>{pendingRecipe.title}</div>
-            <div style={{fontSize:12,color:'var(--ink-light)',marginBottom:6}}>{pendingRecipe.calories&&`🔥 ${pendingRecipe.calories} cal · `}{pendingRecipe.protein&&`${pendingRecipe.protein}g protein`}</div>
-            <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>{(pendingRecipe.diets||[]).map(d=><span key={d} className="diet-badge">{d}</span>)}</div>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+          <button className="btn btn-primary" onClick={openClaude} disabled={!request.trim()}>Open Claude ↗</button>
+          <button className="btn btn-outline btn-sm" onClick={copyPrompt} disabled={!request.trim()}>{copied?"✓ Copied!":"📋 Copy prompt"}</button>
+        </div>
+        <p style={{fontSize:12,color:'var(--ink-light)',marginTop:10,lineHeight:1.6}}>
+          <strong>Open Claude</strong> launches Claude.ai with your prompt ready to go. Hit send, then copy the JSON it replies with and paste it below.
+        </p>
+      </div>
+
+      <div className="ai-panel">
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>Step 2 — Paste Claude's JSON response</div>
+        <textarea
+          className="ai-input"
+          style={{width:'100%',minHeight:120,resize:'vertical',marginBottom:10,padding:12,fontSize:13,fontFamily:'monospace',borderRadius:3,display:'block'}}
+          placeholder={'Paste here — should start with {
+  "title": "..."'}
+          value={pasteText}
+          onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}}
+        />
+        <button className="btn btn-primary" onClick={parseAndPreview} disabled={!pasteText.trim()}>Parse & Preview</button>
+
+        {error && <div style={{marginTop:12,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {error}</div>}
+
+        {result && (
+          <div style={{marginTop:16,background:'var(--parchment-dark)',borderRadius:4,padding:18}}>
+            <div style={{fontFamily:"'Special Elite',monospace",fontSize:11,textTransform:'uppercase',letterSpacing:2,color:'var(--ink-light)',marginBottom:6}}>Preview</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,marginBottom:4}}>{result.title}</div>
+            <div style={{fontSize:13,color:'var(--ink-light)',display:'flex',gap:14,flexWrap:'wrap',marginBottom:8}}>
+              {result.cuisine&&<span>🌍 {result.cuisine}</span>}
+              {result.calories&&<span>🔥 {result.calories} cal</span>}
+              {result.servings&&<span>👤 {result.servings}</span>}
+              <span>📝 {result.ingredients?.length} ingredients · {result.steps?.length} steps</span>
+            </div>
+            {(result.categories||[]).length>0&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>{result.categories.map(c=><span key={c} style={{background:'var(--saffron)',color:'white',padding:'2px 8px',borderRadius:2,fontSize:11,fontWeight:700}}>{c}</span>)}</div>}
+            {(result.diets||[]).length>0&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>{result.diets.map(d=><span key={d} className="diet-badge">{d}</span>)}</div>}
             <div style={{display:'flex',gap:8}}>
-              <button className="btn btn-primary btn-sm" onClick={()=>{onAddRecipe(pendingRecipe);setPendingRecipe(null);setMessages(m=>[...m,{role:"assistant",text:`✓ "${pendingRecipe.title}" saved! You can add a photo from the Library.`}]);}}>Save to Library</button>
-              <button className="btn btn-ghost btn-sm" onClick={()=>setPendingRecipe(null)}>Dismiss</button>
+              <button className="btn btn-primary btn-sm" onClick={saveResult}>✓ Save to Library</button>
+              <button className="btn btn-ghost btn-sm" onClick={()=>setResult(null)}>Discard</button>
             </div>
           </div>
         )}
-        <div className="ai-input-row">
-          <input className="ai-input" placeholder="e.g. 'I have chicken and lemon' or 'Generate a keto dinner'" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMessage()} />
-          <button className="btn btn-primary" onClick={sendMessage} disabled={loading}>Send</button>
-        </div>
-        <div style={{marginTop:12,display:'flex',gap:8,flexWrap:'wrap'}}>
-          {["Suggest something quick","I have eggs, cheese, and spinach","Generate a keto dinner","What pairs well with carbonara?"].map(s=>(
-            <button key={s} className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={()=>setInput(s)}>{s}</button>
-          ))}
-        </div>
+
+        {savedList.length>0&&(
+          <div style={{marginTop:16,borderTop:'1px solid var(--parchment-dark)',paddingTop:12}}>
+            <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:1,color:'var(--sage)',marginBottom:6}}>✓ Saved this session</div>
+            {savedList.map((t,i)=><div key={i} style={{fontSize:13,color:'var(--ink-mid)',padding:'2px 0'}}>{t}</div>)}
+          </div>
+        )}
       </div>
     </div>
   );
