@@ -904,20 +904,27 @@ function DiscoverTab({recipes,onAddRecipe}) {
   // Prompt 1: Generate 5 ideas
   function buildIdeasPrompt(batch) {
     const c = getContext();
-    const batchNote = batch > 1 ? ` I already saw ${(batch-1)*5} suggestions and want ${5} completely different ideas.` : "";
-    return `IMPORTANT: Your entire response must be a single valid JSON array. Do not write any explanation, greeting, markdown, code blocks, or text of any kind before or after the JSON. Start your response with [ and end with ].${batchNote}
+    const batchNote = batch > 1 ? ` Batch ${batch}: give me 5 completely different ideas from the previous ${(batch-1)*5}.` : "";
+    return `I need recipe name suggestions only — no code, no apps, no artifacts.${batchNote}
 
-Generate exactly 5 recipe ideas matching these criteria:
-- Main ingredient: ${c.protein}
-- Cooking method: ${c.cooker}
-- Flavor profile: ${c.flavors}
-- Occasion: ${c.occasion}
-- Servings: ${c.servings}
-${c.notes ? `- Notes: ${c.notes}` : ""}
+My cooking criteria:
+Ingredient: ${c.protein}
+Cooker: ${c.cooker}
+Flavor: ${c.flavors}
+Occasion: ${c.occasion}
+Servings: ${c.servings}
+${c.notes ? `Notes: ${c.notes}` : ""}
 ${c.existing}
 
-Return this exact format with 5 items:
-[{"title":"Name of Recipe","description":"2-3 sentences about what makes it special and how it is cooked"},{"title":"...","description":"..."},{"title":"...","description":"..."},{"title":"...","description":"..."},{"title":"...","description":"..."}]`;
+List exactly 5 recipe names with a short description of each. Format your response as a JSON array like this (replace the examples with real suggestions):
+[
+{"title":"Smoked Brisket Flat","description":"A lean brisket flat rubbed with coffee and brown sugar, smoked low and slow for 8 hours until tender and sliceable."},
+{"title":"Chipotle Beef Ribs","description":"Meaty beef short ribs coated in a chipotle-lime rub, smoked over hickory for fall-off-the-bone tenderness."},
+{"title":"Smoked Chuck Roast","description":"A whole chuck roast treated like brisket, smoked until probe tender and pulled into juicy beef strands."},
+{"title":"Beef Plate Ribs","description":"Massive dinosaur-style beef plate ribs with a simple salt and pepper bark, smoked until a deep mahogany crust forms."},
+{"title":"Smoked Tri-Tip","description":"California-style tri-tip with a garlic herb crust, smoked to medium-rare and sliced thin against the grain."}
+]
+Reply with ONLY the JSON array. Do not add any text, explanation, or code before or after it.`;
   }
 
   // Prompt 2: Full recipe for chosen idea
