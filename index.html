@@ -904,40 +904,42 @@ function DiscoverTab({recipes,onAddRecipe}) {
   // Prompt 1: Generate 5 ideas
   function buildIdeasPrompt(batch) {
     const c = getContext();
-    const batchNote = batch > 1 ? ` Batch ${batch}: give me 5 completely different ideas from the previous ${(batch-1)*5}.` : "";
-    return `I need recipe name suggestions only — no code, no apps, no artifacts.${batchNote}
+    const batchNote = batch > 1 ? `\n\nThis is batch ${batch}. I did not like the previous suggestions. Give me 5 completely different ideas.` : "";
+    return `I am planning a meal and need recipe ideas. Please suggest 5 options as a simple numbered list — no code, no JSON, just readable text.
 
-My cooking criteria:
-Ingredient: ${c.protein}
-Cooker: ${c.cooker}
-Flavor: ${c.flavors}
-Occasion: ${c.occasion}
-Servings: ${c.servings}
-${c.notes ? `Notes: ${c.notes}` : ""}
-${c.existing}
+My cooking setup:
+- Main ingredient: ${c.protein}
+- Cooking on: ${c.cooker}
+- Flavor I want: ${c.flavors}
+- Occasion: ${c.occasion}
+- Servings: ${c.servings}
+${c.notes ? `- Extra: ${c.notes}` : ""}
+${c.existing}${batchNote}
 
-List exactly 5 recipe names with a short description of each. Format your response as a JSON array like this (replace the examples with real suggestions):
-[
-{"title":"Smoked Brisket Flat","description":"A lean brisket flat rubbed with coffee and brown sugar, smoked low and slow for 8 hours until tender and sliceable."},
-{"title":"Chipotle Beef Ribs","description":"Meaty beef short ribs coated in a chipotle-lime rub, smoked over hickory for fall-off-the-bone tenderness."},
-{"title":"Smoked Chuck Roast","description":"A whole chuck roast treated like brisket, smoked until probe tender and pulled into juicy beef strands."},
-{"title":"Beef Plate Ribs","description":"Massive dinosaur-style beef plate ribs with a simple salt and pepper bark, smoked until a deep mahogany crust forms."},
-{"title":"Smoked Tri-Tip","description":"California-style tri-tip with a garlic herb crust, smoked to medium-rare and sliced thin against the grain."}
-]
-Reply with ONLY the JSON array. Do not add any text, explanation, or code before or after it.`;
+Show me 5 numbered recipe ideas like this:
+1. Recipe Name — One or two sentences about what it is and why it sounds good.
+2. Recipe Name — One or two sentences.
+3. Recipe Name — One or two sentences.
+4. Recipe Name — One or two sentences.
+5. Recipe Name — One or two sentences.
+
+After the list add this line exactly:
+---
+Reply with the NUMBER of the recipe you want the full recipe for, or say "5 more" for new ideas.`;
   }
 
   // Prompt 2: Full recipe for chosen idea
   function buildRecipePrompt(idea) {
     const c = getContext();
-    return `You are an expert culinary assistant.
-Create the full recipe for: "${idea.title}"
-Description: ${idea.description}
-Cooking method: ${c.cooker}
+    return `Please give me the full recipe for "${idea.title}".
+
+Cooking on: ${c.cooker}
 Servings: ${c.servings}
 ${c.notes ? `Notes: ${c.notes}` : ""}
 
-Reply with ONLY a valid JSON object, no markdown, no text before or after. Required fields: title, cuisine, categories (array), servings (number), prepTime (number in minutes), cookTime (number in minutes), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts like "2 tbsp butter"), steps (array of strings).
+Return the recipe as a JSON object only — no explanation before or after, just the raw JSON starting with { and ending with }.
+
+The JSON must have these fields: title (string), cuisine (string), categories (array of strings), servings (number), prepTime (number), cookTime (number), description (string), tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts e.g. "2 tbsp butter"), steps (array of strings).
 Categories from: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Soup, Salad, Bread, Drink, Other
 Diets from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, Low-Carb, Low-Fat`;
   }
@@ -1127,69 +1129,66 @@ Diets from: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Nut-Free, L
     <div>
       {backBtn(STAGES.DETAILS)}
 
-      {/* Step A: Get ideas from Claude */}
       <div className="ai-panel" style={{marginBottom:16}}>
-        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:8}}>
-          Step A — Get 5 recipe ideas{ideaBatch>1?` (batch ${ideaBatch})`:""}
+        <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:10}}>
+          Your Request{ideaBatch>1?` — Batch ${ideaBatch}`:""}
         </div>
-        {/* Summary chips */}
-        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:14}}>
+        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16}}>
           {[selections.protein,COOKERS.find(c=>c.value===selections.cooker)?.label,...selections.flavor.map(f=>f.split(",")[0]),OCCASIONS.find(o=>o.value===selections.occasion)?.label,"👤 "+selections.servings].filter(Boolean).map((x,i)=>(
             <span key={i} style={{background:'var(--parchment-dark)',padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:600}}>{x}</span>
           ))}
         </div>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:10}}>
-          <button className="btn btn-primary" onClick={()=>window.open("https://claude.ai/new?q="+encodeURIComponent(buildIdeasPrompt(ideaBatch)),"_blank")}>
-            Open Claude for ideas ↗
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={()=>doCopy(buildIdeasPrompt(ideaBatch),"ideas")}>
-            {copied==="ideas"?"✓ Copied!":"📋 Copy prompt"}
-          </button>
-        </div>
-        <p style={{fontSize:12,color:'var(--ink-light)',marginBottom:14,lineHeight:1.6}}>
-          Claude will give you 5 ideas as a JSON list. Copy the whole response and paste below.
-        </p>
-        <textarea
-          className="ai-input"
-          style={{width:'100%',minHeight:100,resize:'vertical',marginBottom:10,padding:12,fontSize:13,fontFamily:'monospace',borderRadius:3,display:'block'}}
-          placeholder="Paste Claude's JSON array here..."
-          value={ideasPasteText}
-          onChange={e=>{setIdeasPasteText(e.target.value);setIdeasError("");setIdeas([]);}}
-        />
-        <button className="btn btn-primary" onClick={parseIdeas} disabled={!ideasPasteText.trim()}>Show Ideas</button>
-        {ideasError&&<div style={{marginTop:10,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {ideasError}</div>}
-      </div>
 
-      {/* Ideas list */}
-      {ideas.length>0&&(
-        <div className="ai-panel">
-          <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:'uppercase',letterSpacing:2,color:'var(--saffron)',marginBottom:14}}>
-            Step B — Pick one
-          </div>
-          {ideas.map((idea,i)=>(
-            <div key={i} style={{background:'var(--cream)',border:'2px solid var(--parchment-dark)',borderRadius:6,padding:16,marginBottom:10,cursor:'pointer',transition:'all 0.15s'}}
-              onClick={()=>{setChosenIdea(idea);setRecipePasteText("");setResult(null);setRecipeError("");setStage(STAGES.RECIPE);}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor='var(--saffron)'}
-              onMouseLeave={e=>e.currentTarget.style.borderColor='var(--parchment-dark)'}
-            >
-              <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
-                <div style={{width:28,height:28,borderRadius:'50%',background:'var(--saffron)',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Special Elite',monospace",fontSize:14,flexShrink:0,marginTop:2}}>{i+1}</div>
-                <div>
-                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,marginBottom:4}}>{idea.title}</div>
-                  <div style={{fontSize:13,color:'var(--ink-light)',lineHeight:1.6}}>{idea.description}</div>
-                </div>
-              </div>
-              <div style={{marginTop:10,fontSize:12,color:'var(--saffron)',fontWeight:700,textAlign:'right'}}>Tap to build this recipe →</div>
-            </div>
-          ))}
-          <div style={{marginTop:8,paddingTop:16,borderTop:'1px solid var(--parchment-dark)',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
-            <span style={{fontSize:13,color:'var(--ink-light)'}}>None of these?</span>
-            <button className="btn btn-outline btn-sm" onClick={()=>{setIdeaBatch(b=>b+1);setIdeas([]);setIdeasPasteText("");}}>
-              Show me 5 more →
+        {/* Step 1 */}
+        <div style={{background:'var(--parchment-dark)',borderRadius:6,padding:16,marginBottom:12}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>Step 1 — Open Claude and get your 5 ideas</div>
+          <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:12,lineHeight:1.6}}>
+            Claude will show you a numbered list of 5 recipe ideas. Read them and reply with the number you want — or say <strong>"5 more"</strong> for a new set.
+          </p>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+            <button className="btn btn-primary" onClick={()=>window.open("https://claude.ai/new?q="+encodeURIComponent(buildIdeasPrompt(ideaBatch)),"_blank")}>
+              Open Claude ↗
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={()=>doCopy(buildIdeasPrompt(ideaBatch),"ideas")}>
+              {copied==="ideas"?"✓ Copied!":"📋 Copy prompt"}
             </button>
           </div>
         </div>
-      )}
+
+        {/* Step 2 */}
+        <div style={{background:'var(--parchment-dark)',borderRadius:6,padding:16,marginBottom:12}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>Step 2 — Tell Claude which one you want</div>
+          <p style={{fontSize:13,color:'var(--ink-light)',lineHeight:1.6}}>
+            Reply in Claude with just the number, e.g. <strong>"3"</strong> or <strong>"I want number 2"</strong>.<br/>
+            Claude will then give you the full recipe as JSON.
+          </p>
+        </div>
+
+        {/* Step 3 */}
+        <div style={{background:'var(--parchment-dark)',borderRadius:6,padding:16}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>Step 3 — Copy the JSON and enter the recipe name below</div>
+          <p style={{fontSize:13,color:'var(--ink-light)',marginBottom:12,lineHeight:1.6}}>
+            Copy Claude's JSON response, then come back here. Enter the recipe name so we know which one to save.
+          </p>
+          <div style={{marginBottom:10}}>
+            <label className="form-label">Recipe name you chose</label>
+            <input className="form-input" placeholder="e.g. Chipotle Smoked Chicken Breasts"
+              value={chosenIdea?.title||""}
+              onChange={e=>setChosenIdea({title:e.target.value,description:""})}
+            />
+          </div>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+            <button className="btn btn-primary"
+              disabled={!chosenIdea?.title}
+              onClick={()=>{setRecipePasteText("");setResult(null);setRecipeError("");setStage(STAGES.RECIPE);}}>
+              I picked one — paste the recipe →
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{setIdeaBatch(b=>b+1);setChosenIdea(null);}}>
+              Show me 5 more instead
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 
