@@ -567,7 +567,7 @@ function RecipeBook() {
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -575,6 +575,7 @@ function RecipeBook() {
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
         {tab==="import" && <ImportTab onImport={r=>{ upsertRecipe(r); setEditRecipe(r); setTab("library"); }} />}
+        {tab==="pantry" && <PantryTab recipes={recipes} />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{upsertRecipe(r);setShowAdd(false);setEditRecipe(null);}} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
       {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
@@ -1942,6 +1943,236 @@ function SyncModal({ data, onImport, onReplace, onClose }) {
         <div style={{fontSize:12,color:'var(--ink-light)',marginTop:4,lineHeight:1.6}}>
           💡 Tip: To sync with your wife, one of you exports and the other imports using Merge. 
           Do this whenever you add new recipes to keep both libraries in sync.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Pantry Tab ────────────────────────────────────────────────────────────
+const PANTRY_KEY = "recipebook_pantry_v1";
+const PANTRY_CATS = ["Proteins","Produce","Dairy","Grains & Pasta","Canned & Jarred","Spices & Herbs","Sauces & Condiments","Baking","Drinks","Snacks","Other"];
+const STATUS_COLORS = { have:"#5a7a4a", low:"#d4891a", out:"#b84a2e" };
+const STATUS_LABELS = { have:"Have it", low:"Running low", out:"Out / Need" };
+
+function loadPantry() {
+  try { const r=localStorage.getItem(PANTRY_KEY); if(r) return JSON.parse(r); } catch {}
+  return [];
+}
+function savePantry(items) {
+  try { localStorage.setItem(PANTRY_KEY, JSON.stringify(items)); } catch {}
+}
+function pantryUid() { return "p"+Math.random().toString(36).slice(2,9); }
+
+function PantryTab({ recipes }) {
+  const [items, setItems] = useState(()=>loadPantry());
+  const [view, setView] = useState("pantry"); // pantry | shopping
+  const [filterCat, setFilterCat] = useState("");
+  const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [expandedCats, setExpandedCats] = useState({});
+
+  useEffect(()=>{ savePantry(items); }, [items]);
+
+  function upsert(item) {
+    setItems(prev => {
+      const exists = prev.find(x=>x.id===item.id);
+      return exists ? prev.map(x=>x.id===item.id?item:x) : [item,...prev];
+    });
+  }
+  function remove(id) { if(window.confirm("Remove this item?")) setItems(prev=>prev.filter(x=>x.id!==id)); }
+  function cycleStatus(id) {
+    const order = ["have","low","out"];
+    setItems(prev=>prev.map(x=>x.id===id?{...x,status:order[(order.indexOf(x.status)+1)%3]}:x));
+  }
+  function toggleCat(cat) { setExpandedCats(e=>({...e,[cat]:!e[cat]})); }
+
+  const filtered = items.filter(i => {
+    const q = search.toLowerCase();
+    return (!q || i.name.toLowerCase().includes(q) || (i.category||"").toLowerCase().includes(q))
+      && (!filterCat || i.category===filterCat);
+  });
+
+  const shoppingList = items.filter(i=>i.status==="low"||i.status==="out");
+  const usedCats = [...new Set(filtered.map(i=>i.category||"Other"))].sort();
+
+  // Group by category
+  const grouped = {};
+  filtered.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
+
+  const statBadge = (status) => (
+    <span style={{
+      display:"inline-block", padding:"2px 8px", borderRadius:20,
+      fontSize:11, fontWeight:700, background:STATUS_COLORS[status]+"22",
+      color:STATUS_COLORS[status], border:`1px solid ${STATUS_COLORS[status]}44`
+    }}>{STATUS_LABELS[status]}</span>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:20}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>🥫 Pantry</div>
+          <p className="text-muted">{items.length} items · {shoppingList.length} need restocking</p>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className={`btn btn-sm ${view==="pantry"?"btn-primary":"btn-outline"}`} onClick={()=>setView("pantry")}>Pantry</button>
+          <button className={`btn btn-sm ${view==="shopping"?"btn-primary":"btn-outline"}`} onClick={()=>setView("shopping")}>
+            🛒 Shopping {shoppingList.length>0&&<span style={{marginLeft:4,background:"white",color:"var(--saffron)",borderRadius:10,padding:"0 5px",fontSize:10,fontWeight:700}}>{shoppingList.length}</span>}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={()=>{setEditItem(null);setShowAdd(true);}}>+ Add Item</button>
+        </div>
+      </div>
+
+      {view==="shopping" ? (
+        <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} />
+      ) : (
+        <>
+          <div className="toolbar" style={{marginBottom:16}}>
+            <input className="search-input" placeholder="Search pantry…" value={search} onChange={e=>setSearch(e.target.value)} />
+            <select className="filter-select" value={filterCat} onChange={e=>setFilterCat(e.target.value)}>
+              <option value="">All Categories</option>
+              {PANTRY_CATS.map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+
+          {items.length===0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">🥫</div>
+              <div className="empty-title">Your pantry is empty</div>
+              <p>Start adding items to track what you have and what you need.</p>
+            </div>
+          ) : (
+            <div>
+              {usedCats.map(cat=>{
+                const catItems = grouped[cat]||[];
+                const isOpen = expandedCats[cat]!==false; // default open
+                const outCount = catItems.filter(i=>i.status==="out").length;
+                const lowCount = catItems.filter(i=>i.status==="low").length;
+                return (
+                  <div key={cat} style={{marginBottom:8,background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,overflow:"hidden"}}>
+                    <div style={{display:"flex",alignItems:"center",padding:"12px 16px",cursor:"pointer",background:"var(--parchment-dark)"}} onClick={()=>toggleCat(cat)}>
+                      <div style={{flex:1,fontFamily:"'Special Elite',monospace",fontSize:13,textTransform:"uppercase",letterSpacing:1}}>{cat}</div>
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginRight:8}}>
+                        {lowCount>0&&<span style={{fontSize:11,fontWeight:700,color:"var(--saffron)"}}>⚠ {lowCount} low</span>}
+                        {outCount>0&&<span style={{fontSize:11,fontWeight:700,color:"var(--rust)"}}>✕ {outCount} out</span>}
+                        <span style={{fontSize:12,color:"var(--ink-light)"}}>{catItems.length} items</span>
+                      </div>
+                      <span style={{fontSize:16,color:"var(--ink-light)",transform:isOpen?"rotate(0)":"rotate(-90deg)",transition:"transform 0.2s"}}>▾</span>
+                    </div>
+                    {isOpen && (
+                      <div>
+                        {catItems.map(item=>(
+                          <div key={item.id} style={{display:"flex",alignItems:"center",padding:"10px 16px",borderTop:"1px solid var(--parchment-dark)",gap:10}}>
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:600,fontSize:14,marginBottom:2}}>{item.name}</div>
+                              {item.quantity&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{item.quantity}</div>}
+                              {item.notes&&<div style={{fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>{item.notes}</div>}
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <div onClick={()=>cycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
+                              <button className="btn-icon" style={{fontSize:15}} onClick={()=>{setEditItem(item);setShowAdd(true);}}>✏️</button>
+                              <button className="btn-icon" style={{fontSize:15,color:"var(--rust)"}} onClick={()=>remove(item.id)}>🗑</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {showAdd && (
+        <PantryItemModal
+          item={editItem}
+          onSave={i=>{upsert(i);setShowAdd(false);setEditItem(null);}}
+          onClose={()=>{setShowAdd(false);setEditItem(null);}}
+        />
+      )}
+    </div>
+  );
+}
+
+function ShoppingList({ items, onCycleStatus, onEdit, statBadge }) {
+  const grouped = {};
+  items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
+
+  if(items.length===0) return (
+    <div className="empty-state">
+      <div className="empty-icon">🛒</div>
+      <div className="empty-title">Shopping list is clear!</div>
+      <p>Items marked "Running low" or "Out" will appear here.</p>
+    </div>
+  );
+
+  return (
+    <div>
+      <p className="text-muted" style={{marginBottom:16}}>Tap a badge to update status when you restock.</p>
+      {Object.entries(grouped).map(([cat,catItems])=>(
+        <div key={cat} style={{marginBottom:16}}>
+          <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"var(--ink-light)",marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--parchment-dark)"}}>{cat}</div>
+          {catItems.map(item=>(
+            <div key={item.id} style={{display:"flex",alignItems:"center",padding:"10px 0",borderBottom:"1px dashed var(--parchment-dark)",gap:10}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600,fontSize:15}}>{item.name}</div>
+                {item.quantity&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{item.quantity}</div>}
+              </div>
+              <div onClick={()=>onCycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PantryItemModal({ item, onSave, onClose }) {
+  const blank = { id:pantryUid(), name:"", category:"Other", quantity:"", notes:"", status:"have" };
+  const [form, setForm] = useState(item||blank);
+  function set(k,v) { setForm(f=>({...f,[k]:v})); }
+  function save() { if(!form.name.trim()) return; onSave(form); }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:440}}>
+        <div className="modal-title">{item?"Edit Item":"Add Pantry Item"}</div>
+        <div className="form-group">
+          <label className="form-label">Item Name *</label>
+          <input className="form-input" value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. Pecorino Romano" autoFocus />
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Category</label>
+            <select className="form-input" value={form.category} onChange={e=>set("category",e.target.value)}>
+              {PANTRY_CATS.map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Status</label>
+            <select className="form-input" value={form.status} onChange={e=>set("status",e.target.value)}>
+              <option value="have">✓ Have it</option>
+              <option value="low">⚠ Running low</option>
+              <option value="out">✕ Out / Need</option>
+            </select>
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Quantity (optional)</label>
+          <input className="form-input" value={form.quantity} onChange={e=>set("quantity",e.target.value)} placeholder="e.g. 1 bag, half full, 2 cans" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Notes (optional)</label>
+          <input className="form-input" value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="e.g. Whole Foods brand, organic" />
+        </div>
+        <div className="flex gap-8 mt-16">
+          <button className="btn btn-primary" onClick={save}>Save</button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
       </div>
     </div>
