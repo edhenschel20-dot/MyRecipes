@@ -38,7 +38,7 @@ const STYLES = `
 
   /* Nav */
   .nav-tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--ink); margin-bottom: 28px; flex-wrap: wrap; }
-  .nav-tab { padding: 10px 20px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; background: none; border: none; color: var(--ink-light); border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+  .nav-tab { padding: 7px 12px; font-family: 'Lato', sans-serif; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; background: none; border: none; color: var(--ink-light); border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap; }
   .nav-tab:hover { color: var(--ink); }
   .nav-tab.active { color: var(--saffron); border-bottom-color: var(--saffron); }
 
@@ -61,10 +61,10 @@ const STYLES = `
   .tag.ai { background: #dce8d4; color: var(--sage); }
 
   /* Toolbar */
-  .toolbar { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
-  .search-input { flex: 1; min-width: 200px; padding: 10px 14px; font-family: 'Lato', sans-serif; font-size: 14px; border: 1px solid var(--ink-mid); background: var(--cream); color: var(--ink); border-radius: 3px; outline: none; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .search-input { flex: 1; min-width: 140px; padding: 7px 10px; font-family: 'Lato', sans-serif; font-size: 13px; border: 1px solid var(--ink-mid); background: var(--cream); color: var(--ink); border-radius: 3px; outline: none; }
   .search-input:focus { border-color: var(--saffron); box-shadow: 0 0 0 2px rgba(212,137,26,0.2); }
-  .filter-select { padding: 10px 14px; font-family: 'Lato', sans-serif; font-size: 13px; border: 1px solid var(--ink-mid); background: var(--cream); color: var(--ink); border-radius: 3px; cursor: pointer; }
+  .filter-select { padding: 7px 10px; font-family: 'Lato', sans-serif; font-size: 12px; border: 1px solid var(--ink-mid); background: var(--cream); color: var(--ink); border-radius: 3px; cursor: pointer; }
 
   /* Buttons */
   .btn { padding: 10px 20px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border-radius: 3px; transition: all 0.15s; border: 2px solid; }
@@ -599,23 +599,33 @@ function RecipeBook() {
 
 // ── Library Tab ────────────────────────────────────────────────────────────
 function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox}) {
+  const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
       <div className="toolbar">
-        <input className="search-input" placeholder="Search recipes, tags, cuisine…" value={search} onChange={e=>setSearch(e.target.value)} />
+        <input className="search-input" placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} />
         <select className="filter-select" value={filterCuisine} onChange={e=>setFilterCuisine(e.target.value)}>
-          <option value="">All Cuisines</option>{cuisines.map(c=><option key={c}>{c}</option>)}
+          <option value="">Cuisine</option>{cuisines.map(c=><option key={c}>{c}</option>)}
         </select>
         <select className="filter-select" value={filterTag} onChange={e=>setFilterTag(e.target.value)}>
-          <option value="">All Tags</option>{allTags.map(t=><option key={t}>{t}</option>)}
+          <option value="">Tag</option>{allTags.map(t=><option key={t}>{t}</option>)}
         </select>
         <select className="filter-select" value={filterDiet} onChange={e=>setFilterDiet(e.target.value)}>
-          <option value="">All Diets</option>{allDiets.map(d=><option key={d}>{d}</option>)}
+          <option value="">Diet</option>{allDiets.map(d=><option key={d}>{d}</option>)}
         </select>
         <select className="filter-select" value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}>
-          <option value="">All Categories</option>{allCategories.map(c=><option key={c}>{c}</option>)}
+          <option value="">Category</option>{allCategories.map(c=><option key={c}>{c}</option>)}
         </select>
-        <button className={`fav-filter-btn${filterFavorites?" active":""}`} onClick={()=>setFilterFavorites(f=>!f)}>❤️ Favorites</button>
+        <select className="filter-select" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
+          <option value="newest">↓ Newest</option>
+          <option value="oldest">↑ Oldest</option>
+          <option value="az">A → Z</option>
+          <option value="za">Z → A</option>
+          <option value="cuisine">Cuisine</option>
+          <option value="fastest">⏱ Fastest</option>
+          <option value="calories">🔥 Calories</option>
+        </select>
+        <button className={`fav-filter-btn${filterFavorites?" active":""}`} onClick={()=>setFilterFavorites(f=>!f)}>❤️</button>
       </div>
       {selectedRecipe ? (
         <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} />
@@ -623,7 +633,16 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
         <div className="recipe-grid">
-          {recipes.map(r=>(
+          {(()=>{
+            const s=[...recipes];
+            if(sortBy==='az') s.sort((a,b)=>a.title.localeCompare(b.title));
+            else if(sortBy==='za') s.sort((a,b)=>b.title.localeCompare(a.title));
+            else if(sortBy==='cuisine') s.sort((a,b)=>(a.cuisine||"zzz").localeCompare(b.cuisine||"zzz")||a.title.localeCompare(b.title));
+            else if(sortBy==='fastest') s.sort((a,b)=>((a.prepTime||0)+(a.cookTime||0))-((b.prepTime||0)+(b.cookTime||0)));
+            else if(sortBy==='calories') s.sort((a,b)=>(a.calories||9999)-(b.calories||9999));
+            else if(sortBy==='oldest') s.reverse();
+            return s;
+          })().map(r=>(
             <div key={r.id} className="recipe-card" onClick={()=>{setSelectedRecipe(r); window.history.pushState({recipe:true}, '');}}>
               {(() => {
                 const photos = r.photos && r.photos.length > 0 ? r.photos : (r.photo ? [r.photo] : []);
