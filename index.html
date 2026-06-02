@@ -929,52 +929,122 @@ function CookModeOverlay({steps,currentIndex,onNav,onClose,isDinner}) {
 function DinnerTab({recipes,selection,setSelection,onStartCook}) {
   const toggle = id => setSelection(s=>s.includes(id)?s.filter(x=>x!==id):s.length<6?[...s,id]:s);
   const selectedRecipes = selection.map(id=>recipes.find(r=>r.id===id)).filter(Boolean);
+  const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("");
+
+  const filtered = recipes.filter(r => {
+    const q = search.toLowerCase();
+    return (!q || r.title.toLowerCase().includes(q) || (r.cuisine||"").toLowerCase().includes(q) || (r.tags||[]).some(t=>t.includes(q)))
+      && (!filterCat || (r.categories||[]).includes(filterCat) || (r.tags||[]).includes(filterCat));
+  });
+
+  const allCats = [...new Set(recipes.flatMap(r=>r.categories||[]))];
+
   function buildPreview(sel) {
     const colorMap={}; sel.forEach((r,i)=>{colorMap[r.id]=COLORS[i%COLORS.length];});
     const steps=[]; sel.forEach(r=>{r.steps.forEach((text,idx)=>steps.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,globalOrder:idx/r.steps.length}));});
     steps.sort((a,b)=>a.globalOrder-b.globalOrder||sel.findIndex(r=>r.id===a.recipeId)-sel.findIndex(r=>r.id===b.recipeId));
     return steps;
   }
+
   return (
     <div>
-      <div style={{marginBottom:24}}><div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>Dinner Orchestrator</div><p className="text-muted">Select 2–6 dishes. Cook Mode will interleave all steps so everything finishes together.</p></div>
-      <div className="recipe-grid" style={{marginBottom:32}}>
-        {recipes.map(r=>(
+      {/* ── Sticky selection bar ── */}
+      <div style={{position:"sticky",top:0,zIndex:20,background:"var(--parchment)",borderBottom:"2px solid var(--ink)",marginBottom:20,paddingBottom:12,paddingTop:4}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:10}}>
+          <div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>Dinner Planner</div>
+            <div style={{fontSize:12,color:"var(--ink-light)"}}>{selection.length===0?"Pick 2–6 dishes below":selection.length===1?"Pick 1 more to start":`${selection.length} dishes selected`}</div>
+          </div>
+          <button
+            className="btn btn-primary"
+            disabled={selection.length < 2}
+            style={{opacity:selection.length<2?0.4:1}}
+            onClick={onStartCook}
+          >
+            ▶ Cook Together
+          </button>
+        </div>
+
+        {/* Selected dishes chips */}
+        {selectedRecipes.length > 0 ? (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {selectedRecipes.map((r,i)=>{
+              const photos = r.photos&&r.photos.length>0?r.photos:(r.photo?[r.photo]:[]);
+              return (
+                <div key={r.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 10px 4px 4px",borderRadius:20,background:COLORS[i%COLORS.length]+"22",border:`1.5px solid ${COLORS[i%COLORS.length]}`,cursor:"pointer"}} onClick={()=>toggle(r.id)}>
+                  {photos[0]
+                    ? <img src={photos[0]} style={{width:24,height:24,borderRadius:"50%",objectFit:"cover",border:`2px solid ${COLORS[i%COLORS.length]}`}} alt="" />
+                    : <div style={{width:24,height:24,borderRadius:"50%",background:COLORS[i%COLORS.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"white",fontWeight:700}}>{i+1}</div>
+                  }
+                  <span style={{fontSize:12,fontWeight:700,maxWidth:100,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{r.title}</span>
+                  <span style={{fontSize:11,color:COLORS[i%COLORS.length],fontWeight:700}}>✕</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>No dishes selected yet — tap any recipe below</div>
+        )}
+      </div>
+
+      {/* ── Search & filter ── */}
+      <div className="toolbar" style={{marginBottom:16}}>
+        <input className="search-input" placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+        {allCats.length>0&&<select className="filter-select" value={filterCat} onChange={e=>setFilterCat(e.target.value)}>
+          <option value="">All</option>
+          {allCats.map(c=><option key={c}>{c}</option>)}
+        </select>}
+      </div>
+
+      {/* ── Recipe grid ── */}
+      <div className="recipe-grid" style={{marginBottom:24}}>
+        {filtered.map(r=>(
           <div key={r.id} className={`recipe-card${selection.includes(r.id)?" selected":""}`} onClick={()=>toggle(r.id)}>
-            {r.photo
-              ? <img src={r.photo} alt={r.title} className="recipe-card-photo" style={{height:120}} />
-              : <div className="recipe-card-photo-placeholder" style={{height:80}}>{recipeEmoji(r)}</div>
-            }
+            {(()=>{
+              const photos=r.photos&&r.photos.length>0?r.photos:(r.photo?[r.photo]:[]);
+              return photos.length>0
+                ? <img src={photos[0]} alt={r.title} className="recipe-card-photo" style={{height:120}} />
+                : <div className="recipe-card-photo-placeholder" style={{height:80}}>{recipeEmoji(r)}</div>;
+            })()}
             <div className="recipe-card-body">
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-                <div className="recipe-card-title">{r.title}</div>
-                <div style={{width:22,height:22,borderRadius:'50%',flexShrink:0,background:selection.includes(r.id)?COLORS[selection.indexOf(r.id)%COLORS.length]:'transparent',border:selection.includes(r.id)?'none':'2px solid var(--parchment-dark)',display:'flex',alignItems:'center',justifyContent:'center',color:'white',fontSize:12,marginLeft:8}}>{selection.includes(r.id)?(selection.indexOf(r.id)+1):''}</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div className="recipe-card-title" style={{flex:1,paddingRight:8}}>{r.title}</div>
+                <div style={{width:26,height:26,borderRadius:"50%",flexShrink:0,
+                  background:selection.includes(r.id)?COLORS[selection.indexOf(r.id)%COLORS.length]:"transparent",
+                  border:selection.includes(r.id)?"none":"2px solid var(--parchment-dark)",
+                  display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:12,fontWeight:700}}>
+                  {selection.includes(r.id)?(selection.indexOf(r.id)+1):""}
+                </div>
               </div>
-              <div className="recipe-card-meta">{(r.categories||[]).map(c=><span key={c} style={{background:'var(--saffron)',color:'white',padding:'1px 6px',borderRadius:2,fontSize:11,fontWeight:700,marginRight:3}}>{c}</span>)}{r.cuisine&&<span>{r.cuisine}</span>}{r.prepTime!=null&&<span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}{r.calories&&<span>🔥 {r.calories} cal</span>}</div>
+              <div className="recipe-card-meta">
+                {r.cuisine&&<span>{r.cuisine}</span>}
+                {r.prepTime!=null&&<span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}
+                {r.calories&&<span>🔥 {r.calories} cal</span>}
+              </div>
             </div>
           </div>
         ))}
+        {filtered.length===0&&<div style={{gridColumn:"1/-1",textAlign:"center",padding:40,color:"var(--ink-light)"}}>No recipes match your search.</div>}
       </div>
-      {selection.length>=2 && (
-        <div className="detail-panel">
-          <div style={{padding:'20px 24px',borderBottom:'1px solid var(--parchment-dark)',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12}}>
-            <div style={{fontFamily:"'Special Elite',monospace",textTransform:'uppercase',letterSpacing:2,fontSize:13,color:'var(--ink-mid)'}}>Tonight's Dinner</div>
-            <button className="btn btn-primary" onClick={onStartCook}>▶ Start Cooking</button>
+
+      {/* ── Interleaved preview (only when 2+ selected) ── */}
+      {selection.length >= 2 && (
+        <div className="detail-panel" style={{overflow:"hidden"}}>
+          <div style={{padding:"16px 20px",borderBottom:"1px solid var(--parchment-dark)"}}>
+            <div style={{fontFamily:"'Special Elite',monospace",textTransform:"uppercase",letterSpacing:2,fontSize:12,color:"var(--ink-mid)"}}>Step Preview — how they interleave</div>
           </div>
-          <div style={{padding:'16px 24px',display:'flex',gap:16,flexWrap:'wrap',borderBottom:'1px solid var(--parchment-dark)'}}>
-            {selectedRecipes.map((r,i)=>(
-              <div key={r.id} style={{display:'flex',alignItems:'center',gap:10}}>
-                {r.photo
-                  ? <img src={r.photo} alt={r.title} style={{width:44,height:44,borderRadius:'50%',objectFit:'cover',border:`3px solid ${COLORS[i%COLORS.length]}`}} />
-                  : <div style={{width:44,height:44,borderRadius:'50%',background:COLORS[i%COLORS.length]+'33',border:`3px solid ${COLORS[i%COLORS.length]}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>{recipeEmoji(r)}</div>
-                }
-                <div><div style={{fontSize:13,fontWeight:700}}>{r.title}</div><div style={{fontSize:11,color:'var(--ink-light)'}}>{r.steps.length} steps</div></div>
-              </div>
-            ))}
-          </div>
-          <div style={{padding:'0 24px 24px'}}>
-            <div className="detail-section-title">Interleaved Step Preview</div>
-            <div className="orch-timeline">
+          <div style={{padding:"0 20px 20px"}}>
+            <div style={{marginTop:16,display:"flex",gap:10,flexWrap:"wrap"}}>
+              {selectedRecipes.map((r,i)=>(
+                <div key={r.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:20,background:COLORS[i%COLORS.length]+"22",border:`1px solid ${COLORS[i%COLORS.length]}`}}>
+                  <span className="color-swatch" style={{background:COLORS[i%COLORS.length]}}></span>
+                  <span style={{fontSize:12,fontWeight:700}}>{r.title}</span>
+                  <span style={{fontSize:11,opacity:0.7}}>{r.steps.length} steps</span>
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:12}}>
               {buildPreview(selectedRecipes).map((s,i)=>(
                 <div key={i} className="orch-entry">
                   <div className="orch-badge" style={{background:s.color,fontSize:11}}>{s.stepNum}</div>
@@ -985,8 +1055,6 @@ function DinnerTab({recipes,selection,setSelection,onStartCook}) {
           </div>
         </div>
       )}
-      {selection.length===1 && <div className="empty-state"><p>Select one more dish to start the Dinner Orchestrator.</p></div>}
-      {selection.length===0 && <div className="empty-state"><div className="empty-icon">🍽</div><div className="empty-title">No dishes selected</div><p>Pick 2 or more recipes above to plan your dinner.</p></div>}
     </div>
   );
 }
