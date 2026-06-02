@@ -380,7 +380,45 @@ const SAMPLE_RECIPES = [
   { id:"r3", title:"Simple Green Salad", cuisine:"French", servings:4, prepTime:10, cookTime:0, tags:["salad","quick","side"], diets:["Vegetarian","Vegan","Gluten-Free","Dairy-Free"], calories:140, protein:2, carbs:6, fat:13, fiber:2, photo:null, description:"Crisp greens with a classic Dijon vinaigrette.", ingredients:["5oz mixed greens","1 tsp Dijon mustard","2 tbsp red wine vinegar","5 tbsp olive oil","1 shallot, minced","Salt and pepper"], steps:["Whisk together mustard, vinegar, and shallot. Season with salt and pepper.","Slowly drizzle in olive oil, whisking continuously until emulsified.","Toss greens with just enough dressing to coat lightly.","Taste and adjust seasoning. Serve immediately."] }
 ];
 
-// ── Storage ────────────────────────────────────────────────────────────────
+// ── Recipe normalizer ────────────────────────────────────────────────────
+// Converts any format Claude might return into our clean string-based format
+function normalizeRecipe(r) {
+  function ingToString(ing) {
+    if (!ing) return "";
+    if (typeof ing === "string") return ing;
+    if (typeof ing === "object") {
+      const amt = ing.amount != null ? ing.amount : "";
+      const unit = ing.unit || ing.measurement || "";
+      const name = ing.name || ing.ingredient || ing.item || ing.description || "";
+      return [amt, unit, name].filter(Boolean).join(" ").trim();
+    }
+    return String(ing);
+  }
+  function stepToString(s) {
+    if (!s) return "";
+    if (typeof s === "string") return s;
+    if (typeof s === "object") return s.instruction || s.step || s.text || s.description || JSON.stringify(s);
+    return String(s);
+  }
+  return {
+    ...r,
+    ingredients: Array.isArray(r.ingredients) ? r.ingredients.map(ingToString).filter(Boolean) : [],
+    steps: Array.isArray(r.steps) ? r.steps.map(stepToString).filter(Boolean) : [],
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    diets: Array.isArray(r.diets) ? r.diets : [],
+    categories: Array.isArray(r.categories) ? r.categories : [],
+    servings: Number(r.servings) || 4,
+    prepTime: Number(r.prepTime) || 0,
+    cookTime: Number(r.cookTime) || 0,
+    calories: r.calories ? Number(r.calories) : null,
+    protein: r.protein ? Number(r.protein) : null,
+    carbs: r.carbs ? Number(r.carbs) : null,
+    fat: r.fat ? Number(r.fat) : null,
+    fiber: r.fiber ? Number(r.fiber) : null,
+  };
+}
+
+// ── Storage ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "recipebook_v3";
 function loadData() {
   try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
@@ -647,7 +685,21 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
           </div>
           <ul className="ingredient-list">
             {safe.ingredients.map((ing,i)=>{
-              const ingStr = (ing === null || ing === undefined) ? "" : (typeof ing === "string" ? ing : JSON.stringify(ing));
+              let ingStr;
+              if (ing === null || ing === undefined) {
+                ingStr = "";
+              } else if (typeof ing === "string") {
+                ingStr = ing;
+              } else if (typeof ing === "object") {
+                // Convert structured ingredient object to readable string
+                // e.g. {"amount":2,"unit":"tsp","name":"chipotle powder"} -> "2 tsp chipotle powder"
+                const amt = ing.amount != null ? ing.amount : "";
+                const unit = ing.unit || ing.measurement || "";
+                const name = ing.name || ing.ingredient || ing.item || ing.description || "";
+                ingStr = [amt, unit, name].filter(Boolean).join(" ").trim() || JSON.stringify(ing);
+              } else {
+                ingStr = String(ing);
+              }
               const p = parseIngredient(ingStr);
               const hasAmt = p.amount !== null && scale !== 1;
               return (
@@ -996,8 +1048,7 @@ Start your response with { and end with }. No other text.`;
       const clean = recipePasteText.replace(/```json|```/g,"").trim();
       const parsed = JSON.parse(clean);
       if(!parsed.title||!parsed.steps?.length) throw new Error();
-      setResult({...parsed,id:uid(),aiGenerated:true,photo:null,
-        categories:parsed.categories||[],diets:parsed.diets||[],tags:parsed.tags||[]});
+      setResult(normalizeRecipe({...parsed,id:uid(),aiGenerated:true,photo:null}));
     } catch { setRecipeError("Could not parse. Make sure you copied the full JSON from Claude."); }
   }
 
@@ -1342,7 +1393,7 @@ function ImportTab({onImport}) {
       const data=await res.json();
       const parsed=JSON.parse(data.content?.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim());
       if(!parsed.title||!parsed.steps?.length) throw new Error();
-      setResult({...parsed,id:uid(),tags:(parsed.tags||[]),photo:null});
+      setResult(normalizeRecipe({...parsed,id:uid(),photo:null}));
     } catch { setError("Couldn't parse. Try paste mode or check the URL is public."); }
     finally { setLoading(false); }
   }
