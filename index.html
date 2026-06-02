@@ -449,6 +449,17 @@ function RecipeBook() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
+
+  // Handle browser back button
+  useEffect(() => {
+    function onPopState(e) {
+      if (selectedRecipe) {
+        setSelectedRecipe(null);
+      }
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [selectedRecipe]);
   const [showSync, setShowSync] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
@@ -474,7 +485,7 @@ function RecipeBook() {
   function upsertRecipe(r) {
     setData(d => { const e = d.recipes.find(x=>x.id===r.id); return {...d, recipes: e ? d.recipes.map(x=>x.id===r.id?r:x) : [r,...d.recipes]}; });
     // If we're viewing this recipe, refresh it
-    if (selectedRecipe?.id === r.id) setSelectedRecipe(r);
+    if (selectedRecipe?.id === r.id) setSelectedRecipe(r); // no history push on edit save
   }
   function deleteRecipe(id) { if(!window.confirm('Delete this recipe? This cannot be undone.')) return; setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
 
@@ -584,7 +595,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
       ) : (
         <div className="recipe-grid">
           {recipes.map(r=>(
-            <div key={r.id} className="recipe-card" onClick={()=>setSelectedRecipe(r)}>
+            <div key={r.id} className="recipe-card" onClick={()=>{setSelectedRecipe(r); window.history.pushState({recipe:true}, '');}}>
               {r.photo
                 ? <img src={r.photo} alt={r.title} className="recipe-card-photo" />
                 : <div className="recipe-card-photo-placeholder">{recipeEmoji(r)}</div>
@@ -649,7 +660,7 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
   try { if(!recipe) return null;
   return (
     <div>
-      <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Library</button></div>
+      <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={()=>{window.history.back();}}>← Back to Library</button></div>
       <div className="detail-panel">
         <div className="detail-hero">
           {safe.photo
@@ -743,7 +754,7 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
     console.error("RecipeDetail error:", err, recipe);
     return (
       <div>
-        <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Library</button></div>
+        <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={()=>{window.history.back();}}>← Back to Library</button></div>
         <div className="detail-panel" style={{padding:24}}>
           <div style={{color:"var(--rust)",fontWeight:700,marginBottom:8}}>Could not display this recipe</div>
           <div style={{fontSize:13,color:"var(--ink-light)",marginBottom:16}}>{err.message}</div>
