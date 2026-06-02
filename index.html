@@ -567,7 +567,7 @@ function RecipeBook() {
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -576,6 +576,7 @@ function RecipeBook() {
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
         {tab==="import" && <ImportTab onImport={r=>{ upsertRecipe(r); setEditRecipe(r); setTab("library"); }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} />}
+        {tab==="calendar" && <CalendarTab recipes={recipes} />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{upsertRecipe(r);setShowAdd(false);setEditRecipe(null);}} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
       {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
@@ -2240,6 +2241,311 @@ function PantryItemModal({ item, onSave, onClose }) {
         </div>
         <div className="flex gap-8 mt-16">
           <button className="btn btn-primary" onClick={save}>Save</button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Meal Calendar ─────────────────────────────────────────────────────────
+const CAL_KEY = "recipebook_calendar_v1";
+const MEAL_SLOTS = ["breakfast","lunch","dinner","snack"];
+const MEAL_LABELS = { breakfast:"🌅 Breakfast", lunch:"☀️ Lunch", dinner:"🌙 Dinner", snack:"🍎 Snack" };
+const SLOT_COLORS = { breakfast:"#e8a020", lunch:"#5a9a3a", dinner:"#4a6aaa", snack:"#aa4a8a" };
+
+function loadCalendar() {
+  try { const r=localStorage.getItem(CAL_KEY); if(r) return JSON.parse(r); } catch {}
+  return {};
+}
+function saveCalendar(data) {
+  try { localStorage.setItem(CAL_KEY, JSON.stringify(data)); } catch {}
+}
+function dateKey(year,month,day) {
+  return `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+}
+function todayKey() {
+  const d=new Date(); return dateKey(d.getFullYear(),d.getMonth(),d.getDate());
+}
+function addDays(key, n) {
+  const d = new Date(key + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return dateKey(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function CalendarTab({ recipes }) {
+  const [calData, setCalData] = useState(()=>loadCalendar());
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [selectedDay, setSelectedDay] = useState(null); // "YYYY-MM-DD"
+  const [assignModal, setAssignModal] = useState(null); // {dateKey, slot}
+
+  useEffect(()=>{ saveCalendar(calData); },[calData]);
+
+  function setMeal(dateKey, slot, recipeId, isLeftover=false) {
+    setCalData(d=>({...d, [dateKey]:{...(d[dateKey]||{}), [slot]: recipeId ? {id:recipeId, leftover:isLeftover} : null}}));
+  }
+  function clearMeal(dateKey, slot) {
+    setCalData(d=>{
+      const day = {...(d[dateKey]||{})};
+      delete day[slot];
+      const updated = {...d, [dateKey]:day};
+      if(Object.keys(day).length===0) delete updated[dateKey];
+      return updated;
+    });
+  }
+  function assignWithLeftovers(dateKey, slot, recipeId, leftoverSlot, leftoverDays) {
+    setCalData(d=>{
+      let updated = {...d, [dateKey]:{...(d[dateKey]||{}), [slot]:{id:recipeId,leftover:false}}};
+      for(let i=1;i<=leftoverDays;i++) {
+        const lk = addDays(dateKey, i);
+        updated = {...updated, [lk]:{...(updated[lk]||{}), [leftoverSlot]:{id:recipeId,leftover:true}}};
+      }
+      return updated;
+    });
+  }
+
+  // Build calendar grid
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+  const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+  const today_key = todayKey();
+  const selectedDayData = selectedDay ? (calData[selectedDay]||{}) : null;
+
+  // What's for dinner tonight
+  const tonightDinner = calData[today_key]?.dinner;
+  const tonightRecipe = tonightDinner ? recipes.find(r=>r.id===tonightDinner.id) : null;
+
+  return (
+    <div>
+      {/* Tonight banner */}
+      {tonightRecipe && (
+        <div style={{background:"var(--saffron)",color:"white",borderRadius:6,padding:"12px 16px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:20}}>🌙</span>
+          <div>
+            <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,opacity:0.85}}>Tonight's Dinner</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700}}>{tonightRecipe.title}{tonightDinner.leftover&&" ↩"}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Month nav */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+        <button className="btn btn-ghost btn-sm" onClick={()=>{ if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1); }}>‹</button>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700}}>{MONTH_NAMES[viewMonth]} {viewYear}</div>
+        <button className="btn btn-ghost btn-sm" onClick={()=>{ if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1); }}>›</button>
+      </div>
+
+      {/* Day headers */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+        {DAY_NAMES.map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:"var(--ink-light)",padding:"4px 0",textTransform:"uppercase",letterSpacing:0.5}}>{d}</div>)}
+      </div>
+
+      {/* Calendar grid */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:24}}>
+        {Array(firstDay).fill(null).map((_,i)=><div key={"e"+i}/>)}
+        {Array(daysInMonth).fill(null).map((_,i)=>{
+          const day=i+1;
+          const dk=dateKey(viewYear,viewMonth,day);
+          const dayData=calData[dk]||{};
+          const meals=MEAL_SLOTS.filter(s=>dayData[s]);
+          const isToday=dk===today_key;
+          const isSelected=dk===selectedDay;
+          return (
+            <div key={day} onClick={()=>setSelectedDay(isSelected?null:dk)}
+              style={{
+                border: isSelected?"2px solid var(--saffron)": isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
+                borderRadius:6, padding:"6px 4px", minHeight:60, cursor:"pointer",
+                background: isSelected?"rgba(212,137,26,0.08)": isToday?"var(--parchment-dark)":"var(--cream)",
+                transition:"all 0.15s",
+              }}>
+              <div style={{fontFamily:"'Special Elite',monospace",fontSize:13,fontWeight:isToday?700:400,marginBottom:4,textAlign:"center",color:isToday?"var(--ink)":"var(--ink-mid)"}}>{day}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                {meals.map(slot=>{
+                  const entry=dayData[slot];
+                  const recipe=recipes.find(r=>r.id===entry.id);
+                  return (
+                    <div key={slot} style={{
+                      background:SLOT_COLORS[slot], borderRadius:3, padding:"1px 4px",
+                      fontSize:9, color:"white", fontWeight:700,
+                      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                      opacity:entry.leftover?0.65:1,
+                    }}>
+                      {entry.leftover?"↩ ":""}{recipe?recipe.title.slice(0,12)+(recipe.title.length>12?"…":""):"?"}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Day detail panel */}
+      {selectedDay && (
+        <div className="detail-panel" style={{padding:20,marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
+              {new Date(selectedDay+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
+              {selectedDay===today_key&&<span style={{marginLeft:8,fontSize:12,background:"var(--saffron)",color:"white",padding:"1px 8px",borderRadius:10,fontFamily:"'Lato',sans-serif",fontWeight:700}}>Today</span>}
+            </div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {MEAL_SLOTS.map(slot=>{
+              const entry=selectedDayData[slot];
+              const recipe=entry?recipes.find(r=>r.id===entry.id):null;
+              return (
+                <div key={slot} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:6,background:"var(--parchment-dark)",border:`2px solid ${entry?SLOT_COLORS[slot]:"transparent"}`}}>
+                  <div style={{width:4,height:40,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:SLOT_COLORS[slot],marginBottom:2}}>{MEAL_LABELS[slot].split(" ")[1]}</div>
+                    {recipe ? (
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:15,fontWeight:700}}>
+                        {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 6px",borderRadius:10,marginRight:6,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
+                        {recipe.title}
+                      </div>
+                    ) : (
+                      <div style={{fontSize:13,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned</div>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:selectedDay,slot})}>
+                      {recipe?"Change":"+ Add"}
+                    </button>
+                    {recipe&&<button className="btn btn-sm btn-danger" style={{fontSize:11}} onClick={()=>clearMeal(selectedDay,slot)}>✕</button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!selectedDay && (
+        <div style={{textAlign:"center",padding:"20px 0",color:"var(--ink-light)",fontSize:13}}>Tap a day to plan meals</div>
+      )}
+
+      {/* Assign modal */}
+      {assignModal && (
+        <AssignMealModal
+          dateKey={assignModal.dateKey}
+          slot={assignModal.slot}
+          recipes={recipes}
+          currentId={calData[assignModal.dateKey]?.[assignModal.slot]?.id}
+          onAssign={(recipeId, leftoverSlot, leftoverDays)=>{
+            if(leftoverSlot&&leftoverDays>0) {
+              assignWithLeftovers(assignModal.dateKey, assignModal.slot, recipeId, leftoverSlot, leftoverDays);
+            } else {
+              setMeal(assignModal.dateKey, assignModal.slot, recipeId);
+            }
+            setAssignModal(null);
+          }}
+          onClose={()=>setAssignModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AssignMealModal({ dateKey, slot, recipes, currentId, onAssign, onClose }) {
+  const [search, setSearch] = useState("");
+  const [chosen, setChosen] = useState(currentId||null);
+  const [hasLeftovers, setHasLeftovers] = useState(false);
+  const [leftoverSlot, setLeftoverSlot] = useState("lunch");
+  const [leftoverDays, setLeftoverDays] = useState(2);
+  const [step, setStep] = useState("pick"); // pick | leftovers
+
+  const filtered = recipes.filter(r=>{
+    const q=search.toLowerCase();
+    return !q||r.title.toLowerCase().includes(q)||(r.cuisine||"").toLowerCase().includes(q)||(r.tags||[]).some(t=>t.includes(q));
+  });
+
+  const dateLabel = new Date(dateKey+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+
+  if(step==="leftovers") {
+    const recipe = recipes.find(r=>r.id===chosen);
+    return (
+      <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+        <div className="modal" style={{maxWidth:420}}>
+          <div className="modal-title">Leftovers?</div>
+          <p style={{fontSize:14,color:"var(--ink-mid)",marginBottom:20,lineHeight:1.6}}>
+            You're making <strong>{recipe?.title}</strong> for {MEAL_LABELS[slot].split(" ")[1]} on {dateLabel}. Will you eat the leftovers over the next few days?
+          </p>
+          <div style={{display:"flex",gap:10,marginBottom:20}}>
+            <button className={`btn btn-sm ${hasLeftovers?"btn-primary":"btn-outline"}`} onClick={()=>setHasLeftovers(true)}>Yes, fill in leftovers</button>
+            <button className={`btn btn-sm ${!hasLeftovers?"btn-primary":"btn-outline"}`} onClick={()=>setHasLeftovers(false)}>No thanks</button>
+          </div>
+          {hasLeftovers && (
+            <div style={{background:"var(--parchment-dark)",borderRadius:6,padding:16,marginBottom:16}}>
+              <div className="form-group">
+                <label className="form-label">Which meal for leftovers?</label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {MEAL_SLOTS.map(s=>(
+                    <button key={s} className={`btn btn-sm ${leftoverSlot===s?"btn-primary":"btn-outline"}`} onClick={()=>setLeftoverSlot(s)}>
+                      {MEAL_LABELS[s].split(" ")[1]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="form-group" style={{marginBottom:0}}>
+                <label className="form-label">How many days of leftovers?</label>
+                <div style={{display:"flex",gap:8}}>
+                  {[1,2,3,4,5].map(n=>(
+                    <button key={n} className={`btn btn-sm ${leftoverDays===n?"btn-primary":"btn-outline"}`} onClick={()=>setLeftoverDays(n)}>{n}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn btn-primary" onClick={()=>onAssign(chosen, hasLeftovers?leftoverSlot:null, hasLeftovers?leftoverDays:0)}>
+              Save to Calendar
+            </button>
+            <button className="btn btn-ghost" onClick={()=>setStep("pick")}>← Back</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:540}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div className="modal-title" style={{marginBottom:0}}>
+            {MEAL_LABELS[slot]} · {dateLabel}
+          </div>
+          <button className="btn-icon" style={{fontSize:22}} onClick={onClose}>✕</button>
+        </div>
+        <input className="search-input" style={{width:"100%",marginBottom:14}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} autoFocus />
+        <div style={{maxHeight:380,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          {filtered.map(r=>{
+            const photos=r.photos&&r.photos.length>0?r.photos:(r.photo?[r.photo]:[]);
+            return (
+              <div key={r.id} onClick={()=>setChosen(r.id)}
+                style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:6,cursor:"pointer",
+                  border:`2px solid ${chosen===r.id?"var(--saffron)":"var(--parchment-dark)"}`,
+                  background:chosen===r.id?"rgba(212,137,26,0.08)":"var(--cream)",transition:"all 0.15s"}}>
+                {photos[0]
+                  ? <img src={photos[0]} style={{width:44,height:44,borderRadius:6,objectFit:"cover",flexShrink:0}} alt="" />
+                  : <div style={{width:44,height:44,borderRadius:6,background:"var(--parchment-dark)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{recipeEmoji(r)}</div>
+                }
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:15}}>{r.title}</div>
+                  <div style={{fontSize:12,color:"var(--ink-light)"}}>{[r.cuisine, r.prepTime!=null&&((r.prepTime||0)+(r.cookTime||0))+"min", r.calories&&r.calories+"cal"].filter(Boolean).join(" · ")}</div>
+                </div>
+                {chosen===r.id&&<span style={{color:"var(--saffron)",fontSize:20}}>✓</span>}
+              </div>
+            );
+          })}
+          {filtered.length===0&&<div style={{textAlign:"center",padding:30,color:"var(--ink-light)"}}>No recipes match</div>}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button className="btn btn-primary" disabled={!chosen} onClick={()=>setStep("leftovers")}>Next →</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
       </div>
