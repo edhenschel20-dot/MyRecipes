@@ -526,8 +526,10 @@ function RecipeBook() {
     // If we're viewing this recipe, refresh it
     if (selectedRecipe?.id === r.id) setSelectedRecipe(r); // no history push on edit save
   }
-  function quickPhoto(id, photo) {
-    setData(d=>({...d, recipes:d.recipes.map(r=>r.id===id?{...r,photo,photos:[photo]}:r)}));
+  function quickPhoto(id, photo, photos) {
+    const p = photos || [photo];
+    setData(d=>({...d, recipes:d.recipes.map(r=>r.id===id?{...r,photo:p[0],photos:p}:r)}));
+    if(selectedRecipe?.id===id) setSelectedRecipe(r=>({...r,photo:p[0],photos:p}));
   }
 
   function deleteRecipe(id) { if(!window.confirm('Delete this recipe? This cannot be undone.')) return; setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
@@ -644,7 +646,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <button className={`fav-filter-btn${filterFavorites?" active":""}`} onClick={()=>setFilterFavorites(f=>!f)}>❤️</button>
       </div>
       {selectedRecipe ? (
-        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} />
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} onQuickPhoto={onQuickPhoto} />
       ) : recipes.length===0 ? (
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
@@ -741,7 +743,7 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
   );
 }
 
-function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite}) {
+function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite,onQuickPhoto}) {
   const safe = normalizeRecipe({...recipe});
     const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
@@ -754,8 +756,22 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
       {/* Sticky action bar — always visible while scrolling */}
       <div className="recipe-action-bar">
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>{window.history.back();}}>← Back</button>
-        <div className="recipe-action-bar-title">{safe.title}</div>
+        <div style={{flex:1}}/>
         <button className="recipe-action-btn-fav" onClick={()=>onToggleFavorite(safe.id)}>{safe.favorite?"❤️":"🤍"}</button>
+        <label className="recipe-action-btn recipe-action-btn-edit" style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4}} title="Add photo">
+          <input type="file" accept="image/*" style={{width:"0.1px",height:"0.1px",opacity:0,position:"absolute",zIndex:-1}}
+            onChange={async e=>{
+              const file=e.target.files[0]; if(!file) return;
+              const compressed=await compressImage(file);
+              if(compressed){
+                const photos=[...(safe.photos&&safe.photos.length>0?safe.photos:(safe.photo?[safe.photo]:[])),compressed];
+                onQuickPhoto(safe.id, compressed, photos);
+              }
+              e.target.value="";
+            }}
+          />
+          📷
+        </label>
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onEdit(safe)}>✏️ Edit</button>
         <button className="recipe-action-btn recipe-action-btn-cook" onClick={()=>onCook(safe)}>▶ Cook</button>
         <button className="recipe-action-btn recipe-action-btn-danger" onClick={()=>onDelete(safe.id)}>🗑</button>
