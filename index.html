@@ -261,7 +261,7 @@ const STYLES = `
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIET_OPTIONS = ["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Nut-Free","Low-Carb","Low-Fat","Halal","Kosher"];
-const CATEGORIES = ["Appetizer","Breakfast","Brunch","Lunch","Dinner","Dessert","Snack","Side Dish","Sauce","Topping","Dressing","Marinade","Soup","Salad","Bread","Drink","Other"];
+const CATEGORIES = ["Appetizer","Breakfast","Brunch","Lunch","Dinner","Dessert","Snack","Side Dish","Sauce","Topping","Dressing","Marinade","Rub","Soup","Salad","Bread","Drink","Other"];
 const COLORS = ["#d4891a","#b84a2e","#5a7a4a","#4a6a8a","#8a4a7a","#6a8a4a"];
 const FOOD_EMOJIS = { pasta:"🍝", chicken:"🍗", salad:"🥗", soup:"🍜", beef:"🥩", fish:"🐟", pizza:"🍕", default:"🍽" };
 
@@ -521,6 +521,25 @@ function RecipeBook() {
     });
   }
 
+  function findDuplicate(title, excludeId) {
+    if (!title) return null;
+    const norm = t => t.toLowerCase().replace(/[^a-z0-9]/g,"");
+    const a = norm(title);
+    return recipes.find(r => r.id !== excludeId && (() => {
+      const b = norm(r.title);
+      if (a === b) return true;
+      // Check if one contains the other (handles "Ed's Nashville Chicken" vs "Nashville Chicken")
+      if (a.length > 6 && b.length > 6 && (a.includes(b) || b.includes(a))) return true;
+      // Levenshtein-lite: if strings are very close in length and share 85%+ chars
+      if (Math.abs(a.length - b.length) <= 3) {
+        let matches = 0;
+        for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] === b[i]) matches++;
+        if (matches / Math.max(a.length, b.length) > 0.85) return true;
+      }
+      return false;
+    })());
+  }
+
   function upsertRecipe(r) {
     setData(d => { const e = d.recipes.find(x=>x.id===r.id); return {...d, recipes: e ? d.recipes.map(x=>x.id===r.id?r:x) : [r,...d.recipes]}; });
     // If we're viewing this recipe, refresh it
@@ -591,13 +610,34 @@ function RecipeBook() {
           ))}
         </nav>
         {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} />}
-        {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
+        {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
+          const dup = findDuplicate(r.title, r.id);
+          if (dup) {
+            if (!window.confirm(`"${dup.title}" looks similar to "${r.title}". Save anyway?`)) return;
+          }
+          upsertRecipe(r); setTab("library");
+        }} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
-        {tab==="import" && <ImportTab onImport={r=>{ upsertRecipe(r); setEditRecipe(r); setTab("library"); }} />}
+        {tab==="import" && <ImportTab onImport={r=>{
+          const dup = findDuplicate(r.title, r.id);
+          if (dup) {
+            if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
+          }
+          upsertRecipe(r); setEditRecipe(r); setTab("library");
+        }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} />}
       </div>
-      {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{upsertRecipe(r);setShowAdd(false);setEditRecipe(null);}} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
+      {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{
+          // Only check duplicates for new recipes, not edits
+          if (!editRecipe) {
+            const dup = findDuplicate(r.title, r.id);
+            if (dup) {
+              if (!window.confirm(`"${dup.title}" looks similar to "${r.title}". Save anyway?`)) return;
+            }
+          }
+          upsertRecipe(r); setShowAdd(false); setEditRecipe(null);
+        }} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
       {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
       {dinnerCookMode && <CookModeOverlay steps={dinnerCookMode.steps} currentIndex={dinnerCookMode.currentIndex} onNav={dir=>setDinnerCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setDinnerCookMode(null)} isDinner />}
       {showSync && <SyncModal data={data} onImport={imported=>{
@@ -2002,7 +2042,7 @@ function RecipeModal({recipe,onSave,onClose}) {
         <div className="form-group"><label className="form-label">Recipe Title *</label><input className="form-input" value={form.title} onChange={e=>set("title",e.target.value)} placeholder="e.g. Spaghetti Carbonara" /></div>
         <div className="form-row-3">
           <div className="form-group"><label className="form-label">Cuisine</label><input className="form-input" value={form.cuisine} onChange={e=>set("cuisine",e.target.value)} placeholder="Italian, Thai…" /></div>
-          <div className="form-group"><label className="form-label">Category</label><div className="checkbox-group">{["Appetizer","Breakfast","Brunch","Lunch","Dinner","Dessert","Snack","Side Dish","Sauce","Topping","Dressing","Marinade","Soup","Salad","Bread","Drink","Other"].map(c=><label key={c} className="checkbox-label"><input type="checkbox" checked={(form.categories||[]).includes(c)} onChange={()=>{ const cats=form.categories||[]; set("categories", cats.includes(c)?cats.filter(x=>x!==c):[...cats,c]); }} />{c}</label>)}</div></div>
+          <div className="form-group"><label className="form-label">Category</label><div className="checkbox-group">{["Appetizer","Breakfast","Brunch","Lunch","Dinner","Dessert","Snack","Side Dish","Sauce","Topping","Dressing","Marinade","Rub","Soup","Salad","Bread","Drink","Other"].map(c=><label key={c} className="checkbox-label"><input type="checkbox" checked={(form.categories||[]).includes(c)} onChange={()=>{ const cats=form.categories||[]; set("categories", cats.includes(c)?cats.filter(x=>x!==c):[...cats,c]); }} />{c}</label>)}</div></div>
           <div className="form-group"><label className="form-label">Servings</label><input className="form-input" type="number" value={form.servings} onChange={e=>set("servings",e.target.value)} /></div>
         </div>
         <div className="form-row">
