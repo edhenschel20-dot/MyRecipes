@@ -692,30 +692,8 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
 }
 
 function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite}) {
-  const safe = {
-    ...recipe,
-    title: recipe.title || "Untitled",
-    servings: Number(recipe.servings) || 4,
-    prepTime: Number(recipe.prepTime) || 0,
-    cookTime: Number(recipe.cookTime) || 0,
-    calories: recipe.calories ? Number(recipe.calories) : null,
-    protein: recipe.protein ? Number(recipe.protein) : null,
-    carbs: recipe.carbs ? Number(recipe.carbs) : null,
-    fat: recipe.fat ? Number(recipe.fat) : null,
-    fiber: recipe.fiber ? Number(recipe.fiber) : null,
-    sugar: recipe.sugar ? Number(recipe.sugar) : null,
-    sodium: recipe.sodium ? Number(recipe.sodium) : null,
-    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
-    steps: Array.isArray(recipe.steps) ? recipe.steps.map(s=>typeof s==="string"?s:JSON.stringify(s)) : [],
-    tags: Array.isArray(recipe.tags) ? recipe.tags : [],
-    diets: Array.isArray(recipe.diets) ? recipe.diets : [],
-    categories: Array.isArray(recipe.categories) ? recipe.categories : [],
-    description: typeof recipe.description === "string" ? recipe.description : "",
-    cuisine: typeof recipe.cuisine === "string" ? recipe.cuisine : "",
-    photo: recipe.photo || null,
-    favorite: !!recipe.favorite,
-  };
-  const [servings, setServings] = useState(safe.servings);
+  const safe = normalizeRecipe({...recipe});
+    const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
   const scale = servings / base;
   const hasNutrition = safe.calories || safe.protein || safe.carbs || safe.fat;
