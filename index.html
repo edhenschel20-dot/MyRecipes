@@ -1505,12 +1505,29 @@ function parseStashcook(text) {
 
 // ── Recipe URL fetcher ────────────────────────────────────────────────────
 async function fetchRecipeFromUrl(url) {
-  const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
-  const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error("Could not fetch that page");
-  const data = await res.json();
-  const html = data.contents;
-  if (!html) throw new Error("Empty page");
+  // Try multiple CORS proxies in order until one works
+  const proxies = [
+    u => "https://corsproxy.io/?" + encodeURIComponent(u),
+    u => "https://api.allorigins.win/get?url=" + encodeURIComponent(u),
+    u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  ];
+
+  let html = null;
+  for (const makeProxy of proxies) {
+    try {
+      const res = await fetch(makeProxy(url), { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        html = data.contents || data.body || null;
+      } else {
+        html = await res.text();
+      }
+      if (html && html.length > 500) break;
+    } catch(e) { continue; }
+  }
+  if (!html) throw new Error("Could not fetch that page");
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
