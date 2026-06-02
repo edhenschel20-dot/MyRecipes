@@ -757,6 +757,25 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
   }
 }
 
+// ── Ingredient matcher ────────────────────────────────────────────────────
+function extractKeywords(ing) {
+  if (!ing || typeof ing !== "string") return [];
+  let s = ing.replace(/^[\d\s/½⅓⅔¼¾⅛.]+/, "");
+  s = s.replace(/\b(tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|whole|large|medium|small|fresh|dried|finely|chopped|diced|minced|grated|sliced|boneless|skinless)\b/gi, "");
+  s = s.replace(/[,(].*/, "");
+  return s.split(/\s+/).map(w=>w.toLowerCase().trim()).filter(w=>w.length>2);
+}
+
+function matchIngredients(stepText, ingredients) {
+  if (!stepText || typeof stepText !== "string") return [];
+  const stepLower = stepText.toLowerCase();
+  return (ingredients||[]).filter(ing => {
+    if (!ing || typeof ing !== "string") return false;
+    const keywords = extractKeywords(ing);
+    return keywords.some(kw => new RegExp("\\b" + kw, "i").test(stepLower));
+  });
+}
+
 // ── Cook Mode ──────────────────────────────────────────────────────────────
 function CookModeOverlay({steps,currentIndex,onNav,onClose,isDinner}) {
   const step = steps[currentIndex];
