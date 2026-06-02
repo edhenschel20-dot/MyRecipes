@@ -414,22 +414,27 @@ function normalizeRecipe(r) {
     if (!s) return "";
     if (typeof s === "string") return s;
     if (typeof s === "object") {
-      // Handle {"id":"s1","title":"Cube chicken","content":"Mix spices..."} format
+      if (s.instructions) return s.title ? s.title + ": " + s.instructions : s.instructions;
       if (s.content) return s.title ? s.title + ": " + s.content : s.content;
-      return s.instruction || s.step || s.text || s.description || s.title || JSON.stringify(s);
+      return s.instruction || s.text || s.description || s.title || JSON.stringify(s);
     }
     return String(s);
   }
+  const title = r.title || r.name || "Untitled";
+  const prepTime = Number(r.prepTime || r.prep_time || r.prep_time_minutes || r.prepTimeMinutes || 0);
+  const cookTime = Number(r.cookTime || r.cook_time || r.cook_time_minutes || r.cookTimeMinutes || 0);
+  const servings = Number(r.servings || r.yield || r.serves || 4);
+  const cuisine = r.cuisine || r.recipeCuisine || "";
+  const description = r.description || r.summary || "";
+  const extraTags = r.meal_prep_notes ? ["meal-prep"] : [];
+  const tags = [...(Array.isArray(r.tags) ? r.tags : []), ...extraTags];
   return {
     ...r,
+    title, description, cuisine, prepTime, cookTime, servings, tags,
     ingredients: Array.isArray(r.ingredients) ? r.ingredients.map(ingToString).filter(Boolean) : [],
     steps: Array.isArray(r.steps) ? r.steps.map(stepToString).filter(Boolean) : [],
-    tags: Array.isArray(r.tags) ? r.tags : [],
     diets: Array.isArray(r.diets) ? r.diets : [],
     categories: Array.isArray(r.categories) ? r.categories : [],
-    servings: Number(r.servings) || 4,
-    prepTime: Number(r.prepTime) || 0,
-    cookTime: Number(r.cookTime) || 0,
     calories: r.calories ? Number(r.calories) : null,
     protein: r.protein ? Number(r.protein) : null,
     carbs: r.carbs ? Number(r.carbs) : null,
