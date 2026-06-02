@@ -1177,11 +1177,15 @@ Start your response with { and end with }. No other text.`;
   function parseRecipe() {
     setRecipeError(""); setResult(null);
     try {
-      const clean = recipePasteText.replace(/```json|```/g,"").trim();
+      let clean = recipePasteText.replace(/```json|```/g,"").trim();
+      const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      if(s!==-1&&e!==-1) clean=clean.slice(s,e+1);
       const parsed = JSON.parse(clean);
-      if(!parsed.title||!parsed.steps?.length) throw new Error();
-      setResult(normalizeRecipe({...parsed,id:uid(),aiGenerated:true,photo:null}));
-    } catch { setRecipeError("Could not parse. Make sure you copied the full JSON from Claude."); }
+      const norm = normalizeRecipe({...parsed,id:uid(),aiGenerated:true,photo:null,photos:[]});
+      if(!norm.title||norm.title==="Untitled") throw new Error("No title found");
+      if(!norm.steps||!norm.steps.length) throw new Error("No steps found");
+      setResult(norm);
+    } catch(e) { setRecipeError("Could not parse: "+e.message+". Make sure you copied the full JSON."); }
   }
 
   function saveResult() {
@@ -1655,7 +1659,7 @@ function ImportTab({onImport}) {
       const clean = text.replace(/```json|```/g,"").trim();
       const start = clean.indexOf("{"), end = clean.lastIndexOf("}");
       const parsed = JSON.parse(clean.slice(start, end+1));
-      if(!parsed.title||!parsed.steps?.length) throw new Error();
+      // flexible - normalizeRecipe handles field variations
       setResult(normalizeRecipe({...parsed, id:uid(), photo:null, photos:[]}));
     } catch { setError("Couldn't parse that text. Make sure it contains a full recipe."); }
     finally { setLoading(false); }
