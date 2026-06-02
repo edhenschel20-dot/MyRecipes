@@ -514,6 +514,10 @@ function RecipeBook() {
     // If we're viewing this recipe, refresh it
     if (selectedRecipe?.id === r.id) setSelectedRecipe(r); // no history push on edit save
   }
+  function quickPhoto(id, photo) {
+    setData(d=>({...d, recipes:d.recipes.map(r=>r.id===id?{...r,photo,photos:[photo]}:r)}));
+  }
+
   function deleteRecipe(id) { if(!window.confirm('Delete this recipe? This cannot be undone.')) return; setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
 
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
@@ -572,7 +576,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
         {tab==="import" && <ImportTab onImport={r=>{ upsertRecipe(r); setEditRecipe(r); setTab("library"); }} />}
@@ -598,7 +602,7 @@ function RecipeBook() {
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto}) {
   const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
@@ -646,12 +650,31 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
             <div key={r.id} className="recipe-card" onClick={()=>{setSelectedRecipe(r); window.history.pushState({recipe:true}, '');}}>
               {(() => {
                 const photos = r.photos && r.photos.length > 0 ? r.photos : (r.photo ? [r.photo] : []);
-                return photos.length > 0
-                  ? <div style={{position:"relative"}}>
-                      <img src={photos[0]} alt={r.title} className="recipe-card-photo" />
-                      {photos.length > 1 && <div style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.55)",color:"white",borderRadius:10,padding:"2px 7px",fontSize:11,fontWeight:700}}>📷 {photos.length}</div>}
-                    </div>
-                  : <div className="recipe-card-photo-placeholder">{recipeEmoji(r)}</div>;
+                if (photos.length > 0) return (
+                  <div style={{position:"relative"}}>
+                    <img src={photos[0]} alt={r.title} className="recipe-card-photo" />
+                    {photos.length > 1 && <div style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.55)",color:"white",borderRadius:10,padding:"2px 7px",fontSize:11,fontWeight:700}}>📷 {photos.length}</div>}
+                  </div>
+                );
+                return (
+                  <div className="recipe-card-photo-placeholder" style={{position:"relative"}}>
+                    <span>{recipeEmoji(r)}</span>
+                    <label style={{position:"absolute",bottom:8,right:8,background:"var(--saffron)",color:"white",borderRadius:20,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}
+                      onClick={e=>e.stopPropagation()}>
+                      <input type="file" accept="image/*" style={{width:"0.1px",height:"0.1px",opacity:0,position:"absolute",zIndex:-1}}
+                        onChange={async e=>{
+                          e.stopPropagation();
+                          const file=e.target.files[0];
+                          if(!file) return;
+                          const compressed=await compressImage(file);
+                          if(compressed) onQuickPhoto(r.id, compressed);
+                          e.target.value="";
+                        }}
+                      />
+                      📷 Add
+                    </label>
+                  </div>
+                );
               })()}
               <div className="recipe-card-body">
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
@@ -1714,27 +1737,30 @@ function parseUrlMicrodata(el, sourceUrl, imageUrl) {
 
 async function fetchAndAttachPhoto(recipe) {
   if (!recipe._imageUrl) return recipe;
-  try {
-    const proxies = [
-      u => "https://corsproxy.io/?" + encodeURIComponent(u),
-      u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-    ];
-    for (const makeProxy of proxies) {
-      try {
-        const res = await fetch(makeProxy(recipe._imageUrl), { signal: AbortSignal.timeout(8000) });
-        if (!res.ok) continue;
-        const blob = await res.blob();
-        if (!blob.type.startsWith("image/")) continue;
-        const compressed = await compressImage(new File([blob], "photo.jpg", { type: blob.type }));
-        if (compressed) {
-          const { _imageUrl, ...rest } = recipe;
-          return { ...rest, photo: compressed, photos: [compressed] };
-        }
-      } catch(e) { continue; }
-    }
-  } catch(e) {}
-  const { _imageUrl, ...rest } = recipe;
-  return rest;
+  // Try multiple proxy + method combinations
+  const imageUrl = recipe._imageUrl;
+  const proxies = [
+    u => "https://corsproxy.io/?" + encodeURIComponent(u),
+    u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+    u => "https://images.weserv.nl/?url=" + encodeURIComponent(u.replace(/^https?:\/\//,"")),
+  ];
+  for (const makeProxy of proxies) {
+    try {
+      const proxiedUrl = makeProxy(imageUrl);
+      const res = await fetch(proxiedUrl, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (!blob.type.startsWith("image/") && !blob.type.includes("octet")) continue;
+      const file = new File([blob], "photo.jpg", { type: blob.type.startsWith("image/") ? blob.type : "image/jpeg" });
+      const compressed = await compressImage(file);
+      if (compressed) {
+        const { _imageUrl, ...rest } = recipe;
+        return { ...rest, photo: compressed, photos: [compressed] };
+      }
+    } catch(e) { continue; }
+  }
+  // All proxies failed — return recipe without photo but keep _imageUrl so edit form can show Fetch button
+  return recipe;
 }
 
 
@@ -1919,7 +1945,7 @@ function RecipeModal({recipe,onSave,onClose}) {
                 } catch {}
               }}>Add</button>
             </div>
-            <div style={{fontSize:11,color:"var(--ink-light)",marginTop:4}}>Paste any image URL and tap Add, or press Enter</div>
+            <div style={{fontSize:11,color:"var(--ink-light)",marginTop:4}}>On Android: open the recipe website, long-press the photo → "Copy image address", then paste here and tap Add</div>
           </div>
         </div>
 
