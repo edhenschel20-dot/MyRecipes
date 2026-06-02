@@ -493,12 +493,19 @@ function RecipeBook() {
   });
 
   function startCookMode(recipe) {
-    const r = normalizeRecipe(recipe);
-    setCookMode({ recipe:r, steps: r.steps.map((s,i)=>({
-      text: typeof s === "string" ? s : String(s),
-      num:i+1, recipe:r.title, photo:r.photo,
-      matchedIngs: matchIngredients(typeof s === "string" ? s : String(s), r.ingredients)
-    })), currentIndex:0 });
+    try {
+      const r = normalizeRecipe(recipe);
+      const steps = (r.steps||[]).map((s,i)=>{
+        const text = typeof s === "string" ? s : (s && s.content ? s.content : String(s||""));
+        let matched = [];
+        try { matched = matchIngredients(text, r.ingredients||[]); } catch(e) {}
+        return { text, num:i+1, recipe:r.title||"", photo:r.photo||null, matchedIngs:matched };
+      });
+      if(steps.length === 0) { alert("This recipe has no steps yet."); return; }
+      setCookMode({ recipe:r, steps, currentIndex:0 });
+    } catch(e) {
+      alert("Could not start cook mode: " + e.message);
+    }
   }
   function buildDinnerSteps(ids) {
     const sel = ids.map(id=>recipes.find(r=>r.id===id)).filter(Boolean);
