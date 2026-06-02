@@ -397,7 +397,11 @@ function normalizeRecipe(r) {
   function stepToString(s) {
     if (!s) return "";
     if (typeof s === "string") return s;
-    if (typeof s === "object") return s.instruction || s.step || s.text || s.description || JSON.stringify(s);
+    if (typeof s === "object") {
+      // Handle {"id":"s1","title":"Cube chicken","content":"Mix spices..."} format
+      if (s.content) return s.title ? s.title + ": " + s.content : s.content;
+      return s.instruction || s.step || s.text || s.description || s.title || JSON.stringify(s);
+    }
     return String(s);
   }
   return {
@@ -421,7 +425,14 @@ function normalizeRecipe(r) {
 // ── Storage ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "recipebook_v3";
 function loadData() {
-  try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
+  try {
+    const r = localStorage.getItem(STORAGE_KEY);
+    if (r) {
+      const d = JSON.parse(r);
+      // Normalize all recipes on load to fix any bad data from previous imports
+      return {...d, recipes: (d.recipes||[]).map(normalizeRecipe)};
+    }
+  } catch {}
   return { recipes: SAMPLE_RECIPES };
 }
 function saveData(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} }
