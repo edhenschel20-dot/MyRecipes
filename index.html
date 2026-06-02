@@ -127,6 +127,18 @@ const STYLES = `
   .scaler-value { font-family: 'Special Elite', monospace; font-size: 22px; color: var(--ink); min-width: 32px; text-align: center; }
   .scaler-original { font-size: 12px; color: var(--ink-light); }
 
+  /* Sticky recipe action bar */
+  .recipe-action-bar { position: sticky; top: 0; z-index: 20; background: var(--ink); padding: 10px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  .recipe-action-bar-title { font-family: 'Playfair Display', serif; font-size: 15px; color: white; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .recipe-action-btn { padding: 8px 14px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 3px; cursor: pointer; border: none; transition: all 0.15s; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+  .recipe-action-btn-cook { background: var(--saffron); color: white; }
+  .recipe-action-btn-cook:active { background: var(--saffron-light); }
+  .recipe-action-btn-edit { background: rgba(255,255,255,0.15); color: white; }
+  .recipe-action-btn-edit:active { background: rgba(255,255,255,0.25); }
+  .recipe-action-btn-fav { background: none; border: none; font-size: 20px; padding: 6px; cursor: pointer; }
+  .recipe-action-btn-danger { background: rgba(184,74,46,0.85); color: white; }
+  .recipe-action-btn-danger:active { background: var(--rust); }
+
   /* Photo upload widget */
   .photo-upload-label { display: block; border: 2px dashed var(--parchment-dark); border-radius: 6px; padding: 20px 16px; text-align: center; background: var(--cream); cursor: pointer; -webkit-tap-highlight-color: rgba(212,137,26,0.1); }
   .photo-upload-label:active { background: rgba(212,137,26,0.06); border-color: var(--saffron); }
@@ -716,11 +728,6 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
         : <div className="detail-hero-placeholder" style={{height:"220px"}}>{recipeEmoji(safe)}</div>
       }
       <div className="detail-hero-overlay" />
-      <div className="detail-hero-actions">
-        <button className="detail-hero-btn detail-hero-btn-primary" onClick={onCook}>▶ Cook</button>
-        <button className="detail-hero-btn detail-hero-btn-light" onClick={onEdit}>Edit</button>
-        <button className="detail-hero-btn detail-hero-btn-danger" onClick={onDelete}>Delete</button>
-      </div>
       {photos.length > 1 && (
         <div style={{position:"absolute",bottom:12,left:"50%",transform:"translateX(-50%)",display:"flex",gap:6,alignItems:"center"}}>
           <button className="lightbox-prev" style={{position:"static",transform:"none",padding:"6px 10px",fontSize:18}} onClick={e=>{e.stopPropagation();setCurrent(i=>Math.max(0,i-1));}}>‹</button>
@@ -744,15 +751,20 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
   try { if(!recipe) return null;
   return (
     <div>
-      <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={()=>{window.history.back();}}>← Back to Library</button></div>
+      {/* Sticky action bar — always visible while scrolling */}
+      <div className="recipe-action-bar">
+        <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>{window.history.back();}}>← Back</button>
+        <div className="recipe-action-bar-title">{safe.title}</div>
+        <button className="recipe-action-btn-fav" onClick={()=>onToggleFavorite(safe.id)}>{safe.favorite?"❤️":"🤍"}</button>
+        <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onEdit(safe)}>✏️ Edit</button>
+        <button className="recipe-action-btn recipe-action-btn-cook" onClick={()=>onCook(safe)}>▶ Cook</button>
+        <button className="recipe-action-btn recipe-action-btn-danger" onClick={()=>onDelete(safe.id)}>🗑</button>
+      </div>
       <div className="detail-panel">
         <DetailHero safe={safe} onCook={()=>onCook(safe)} onEdit={()=>onEdit(safe)} onDelete={()=>onDelete(safe.id)} onLightbox={onLightbox} />
 
         <div className="detail-content">
-          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-            <div className="detail-title" style={{marginBottom:0}}>{safe.title}</div>
-            <button className="fav-btn" style={{fontSize:28}} onClick={()=>onToggleFavorite(safe.id)} title={safe.favorite?"Remove from favorites":"Add to favorites"}>{safe.favorite?"❤️":"🤍"}</button>
-          </div>
+          <div className="detail-title">{safe.title}</div>
           <div className="detail-meta">
             {(safe.categories||[]).map(c=><span key={c} style={{background:"var(--saffron)",color:"white",padding:"2px 10px",borderRadius:3,fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",marginRight:4}}>{c}</span>)}
             {safe.cuisine && <span>🌍 {safe.cuisine}</span>}
