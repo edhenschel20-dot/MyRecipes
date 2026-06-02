@@ -757,6 +757,19 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
   }
 }
 
+// ── Ingredient amount parser (for cook mode display) ─────────────────────
+function parseIngAmount(ing) {
+  if (!ing || typeof ing !== "string") return { amount: "", name: ing || "" };
+  const frac = {"½":"1/2","⅓":"1/3","⅔":"2/3","¼":"1/4","¾":"3/4","⅛":"1/8"};
+  let s = ing.trim();
+  Object.entries(frac).forEach(([k,v])=>{ s=s.replace(k,v); });
+  const units = "tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|pinches|whole|large|medium|small|cloves?|heads?|bunch|bunches|pieces?|strips?|cans?|jars?";
+  const re = new RegExp("^([\\d\\s/.-]+(?:\\s*(?:" + units + "))?)\\s*(.*)$","i");
+  const m = s.match(re);
+  if (m) return { amount: m[1].trim(), name: m[2].replace(/^[,\s]+/,"").trim() };
+  return { amount: "", name: ing };
+}
+
 // ── Ingredient matcher ────────────────────────────────────────────────────
 function extractKeywords(ing) {
   if (!ing || typeof ing !== "string") return [];
