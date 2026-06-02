@@ -26,7 +26,8 @@ const STYLES = `
     --saffron-light: #f0b84b; --rust: #b84a2e; --sage: #5a7a4a;
     --cream: #faf7f0; --shadow: rgba(26,20,16,0.12);
   }
-  body { background: var(--parchment); color: var(--ink); font-family: 'Lato', sans-serif; min-height: 100vh; }
+  body { background: var(--parchment); color: var(--ink); font-family: 'Lato', sans-serif; min-height: 100vh; -webkit-overflow-scrolling: touch; }
+  * { -webkit-tap-highlight-color: transparent; }
   .app { max-width: 1200px; margin: 0 auto; padding: 0 16px 80px; }
 
   /* Header */
@@ -80,8 +81,8 @@ const STYLES = `
   .btn-icon:hover { color: var(--saffron); }
 
   /* Detail panel */
-  .detail-panel { background: var(--cream); border: 1px solid var(--parchment-dark); border-radius: 6px; box-shadow: 3px 3px 0 var(--shadow); overflow: hidden; }
-  .detail-hero { position: relative; width: 100%; height: 300px; background: var(--parchment-dark); overflow: hidden; }
+  .detail-panel { background: var(--cream); border: 1px solid var(--parchment-dark); border-radius: 6px; box-shadow: 3px 3px 0 var(--shadow); }
+  .detail-hero { position: relative; width: 100%; height: 220px; background: var(--parchment-dark); overflow: hidden; flex-shrink: 0; }
   .detail-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .detail-hero-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 72px; color: var(--ink-light); background: var(--parchment-dark); }
   .detail-hero-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 40%, rgba(26,20,16,0.7)); }
@@ -93,7 +94,7 @@ const STYLES = `
   .detail-hero-btn-primary:hover { background: var(--saffron); }
   .detail-hero-btn-danger { background: rgba(184,74,46,0.85); color: white; }
   .detail-hero-btn-danger:hover { background: var(--rust); }
-  .detail-content { padding: 28px 32px 32px; }
+  .detail-content { padding: 20px 16px 32px; }
   .detail-title { font-family: 'Playfair Display', serif; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
   .detail-meta { display: flex; gap: 20px; color: var(--ink-light); font-size: 13px; margin-bottom: 20px; flex-wrap: wrap; }
   .detail-section-title { font-family: 'Special Elite', monospace; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; color: var(--ink-mid); margin: 24px 0 12px; border-bottom: 1px solid var(--parchment-dark); padding-bottom: 8px; }
@@ -585,14 +586,15 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
   const scale = servings / base;
   const hasNutrition = safe.calories || safe.protein || safe.carbs || safe.fat;
 
+  try { if(!recipe) return null;
   return (
     <div>
       <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Library</button></div>
       <div className="detail-panel">
         <div className="detail-hero">
           {safe.photo
-            ? <img src={safe.photo} alt={safe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in"}} onClick={()=>onLightbox(safe.photo)} />
-            : <div className="detail-hero-placeholder">{recipeEmoji(safe)}</div>
+            ? <img src={safe.photo} alt={safe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in",display:"block"}} onClick={()=>onLightbox(safe.photo)} />
+            : <div className="detail-hero-placeholder" style={{height:"220px"}}>{recipeEmoji(safe)}</div>
           }
           <div className="detail-hero-overlay" />
           <div className="detail-hero-actions">
@@ -662,6 +664,22 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
       </div>
     </div>
   );
+  } catch(err) {
+    console.error("RecipeDetail error:", err, recipe);
+    return (
+      <div>
+        <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={onBack}>← Back to Library</button></div>
+        <div className="detail-panel" style={{padding:24}}>
+          <div style={{color:"var(--rust)",fontWeight:700,marginBottom:8}}>Could not display this recipe</div>
+          <div style={{fontSize:13,color:"var(--ink-light)",marginBottom:16}}>{err.message}</div>
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn btn-outline btn-sm" onClick={()=>onEdit(recipe)}>Edit Recipe</button>
+            <button className="btn btn-danger btn-sm" onClick={()=>onDelete(recipe.id)}>Delete</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }
 
 // ── Cook Mode ──────────────────────────────────────────────────────────────
