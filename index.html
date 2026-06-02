@@ -1747,7 +1747,33 @@ function ImportTab({onImport}) {
   const [result,setResult] = useState(null);
   const [error,setError] = useState("");
   const [imported,setImported] = useState([]);
-  function handleStashcookParse() { setError("");setResult(null); const r=parseStashcook(pasteText); if(r)setResult(r); else setError("Couldn't parse. Make sure it's a full Stashcook share."); }
+  async function handleStashcookParse() {
+    setError(""); setResult(null);
+    const r = parseStashcook(pasteText);
+    if (!r) { setError("Couldn't parse. Make sure it's a full Stashcook share."); return; }
+    // If the recipe has a source URL, auto-fetch the photo from that page
+    if (r.source) {
+      setLoading(true);
+      try {
+        const proxied = "https://corsproxy.io/?" + encodeURIComponent(r.source);
+        const res = await fetch(proxied, { signal: AbortSignal.timeout(8000) });
+        const html = await res.text();
+        const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+                || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+        if (m) {
+          const withPhoto = await fetchAndAttachPhoto({ ...r, _imageUrl: m[1] });
+          setResult(withPhoto);
+        } else {
+          setResult(r);
+        }
+      } catch {
+        setResult(r); // still save without photo if fetch fails
+      }
+      setLoading(false);
+    } else {
+      setResult(r);
+    }
+  }
   async function handleUrlImport(url) {
     setError(""); setResult(null); setLoading(true);
     try {
@@ -1794,7 +1820,7 @@ function ImportTab({onImport}) {
         ))}
       </div>
       <div className="ai-panel">
-        {mode==="stashcook" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>In Stashcook: open recipe → <strong>Share</strong> → <strong>Share as text</strong>. Paste below.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontFamily:'monospace',fontSize:13}} placeholder="Classic Steakhouse Mustard Sauce..." value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={handleStashcookParse} disabled={!pasteText.trim()}>Parse Recipe</button></div>)}
+        {mode==="stashcook" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>In Stashcook: open recipe → <strong>Share</strong> → <strong>Share as text</strong>. Paste below.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontFamily:'monospace',fontSize:13}} placeholder="Classic Steakhouse Mustard Sauce..." value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={handleStashcookParse} disabled={!pasteText.trim()||loading}>{loading?"Fetching photo…":"Parse & Import"}</button></div>)}
         {mode==="url" && (
           <div>
             <p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>
