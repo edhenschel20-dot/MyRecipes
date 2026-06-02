@@ -128,19 +128,26 @@ const STYLES = `
   .scaler-original { font-size: 12px; color: var(--ink-light); }
 
   /* Photo upload widget */
-  .photo-upload-label { display: block; border: 2px dashed var(--parchment-dark); border-radius: 6px; padding: 28px 16px; text-align: center; background: var(--cream); cursor: pointer; -webkit-tap-highlight-color: rgba(212,137,26,0.1); }
+  .photo-upload-label { display: block; border: 2px dashed var(--parchment-dark); border-radius: 6px; padding: 20px 16px; text-align: center; background: var(--cream); cursor: pointer; -webkit-tap-highlight-color: rgba(212,137,26,0.1); }
   .photo-upload-label:active { background: rgba(212,137,26,0.06); border-color: var(--saffron); }
   .photo-upload-label input[type=file] { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
-  .photo-upload-icon { font-size: 36px; display: block; margin-bottom: 10px; pointer-events: none; }
-  .photo-upload-text { display: block; font-size: 15px; font-weight: 700; color: var(--saffron); pointer-events: none; margin-bottom: 4px; }
-  .photo-upload-sub { display: block; font-size: 12px; color: var(--ink-light); pointer-events: none; }
-  .photo-preview-wrap { position: relative; width: 100%; }
-  .photo-preview { width: 100%; max-height: 220px; object-fit: cover; border-radius: 4px; display: block; }
-  .photo-actions { display: flex; gap: 8px; margin-top: 8px; }
-  .photo-change-label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: none; color: var(--ink-mid); border: 2px solid var(--parchment-dark); border-radius: 3px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; -webkit-tap-highlight-color: rgba(0,0,0,0.05); }
-  .photo-change-label input[type=file] { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
-  .photo-change-label:active { background: var(--parchment-dark); }
-  .photo-remove-btn { padding: 8px 16px; background: none; color: var(--rust); border: 2px solid var(--rust); border-radius: 3px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; -webkit-tap-highlight-color: rgba(184,74,46,0.1); }
+  .photo-upload-icon { font-size: 28px; display: block; margin-bottom: 6px; pointer-events: none; }
+  .photo-upload-text { display: block; font-size: 14px; font-weight: 700; color: var(--saffron); pointer-events: none; margin-bottom: 2px; }
+  .photo-upload-sub { display: block; font-size: 11px; color: var(--ink-light); pointer-events: none; }
+  /* Multi-photo gallery */
+  .photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px,1fr)); gap: 8px; margin-bottom: 10px; }
+  .photo-thumb-wrap { position: relative; aspect-ratio: 1; border-radius: 4px; overflow: hidden; }
+  .photo-thumb { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
+  .photo-thumb-hero { border: 3px solid var(--saffron); }
+  .photo-thumb-remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(184,74,46,0.9); color: white; border: none; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .photo-thumb-hero-label { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(212,137,26,0.85); color: white; font-size: 9px; font-weight: 700; text-align: center; padding: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .photo-set-hero-btn { position: absolute; top: 4px; left: 4px; padding: 2px 6px; background: rgba(0,0,0,0.5); color: white; border: none; border-radius: 3px; font-size: 10px; cursor: pointer; }
+  /* Lightbox nav */
+  .lightbox-prev, .lightbox-next { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.15); border: none; color: white; font-size: 28px; padding: 12px 16px; cursor: pointer; border-radius: 4px; }
+  .lightbox-prev { left: 16px; }
+  .lightbox-next { right: 16px; }
+  .lightbox-counter { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.7); font-size: 13px; }
+  .photo-remove-btn { padding: 8px 16px; background: none; color: var(--rust); border: 2px solid var(--rust); border-radius: 3px; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; }
   .photo-remove-btn:active { background: var(--rust); color: white; }
 
   /* Photo lightbox */
@@ -273,46 +280,55 @@ function compressImage(file, maxPx = 1200, quality = 0.82) {
   });
 }
 
-// ── Photo Upload Component ─────────────────────────────────────────────────
-// Label-wraps the input — the only approach that works reliably across all
-// mobile browsers including Android Chrome in iframes.
-function PhotoUpload({ value, onChange }) {
+// ── Multi-Photo Upload Component ──────────────────────────────────────────
+// photos: array of base64 strings. photos[0] is always the hero/cover.
+function PhotoUpload({ photos, onChange }) {
   const [loading, setLoading] = useState(false);
+  const photoArr = Array.isArray(photos) ? photos : (photos ? [photos] : []);
 
-  async function handleChange(e) {
-    const file = e.target.files[0];
-    if (!file || !file.type.startsWith("image/")) return;
+  async function handleAdd(e) {
+    const files = Array.from(e.target.files||[]);
+    if (!files.length) return;
     setLoading(true);
-    const compressed = await compressImage(file);
+    const compressed = await Promise.all(files.map(f => compressImage(f)));
     setLoading(false);
-    if (compressed) onChange(compressed);
-    e.target.value = ""; // allow re-selecting same file
+    const valid = compressed.filter(Boolean);
+    if (valid.length) onChange([...photoArr, ...valid]);
+    e.target.value = "";
   }
 
-  if (value) {
-    return (
-      <div className="photo-preview-wrap">
-        <img src={value} alt="Recipe" className="photo-preview" />
-        <div className="photo-actions">
-          <label className="photo-change-label">
-            <input type="file" accept="image/*" onChange={handleChange} />
-            📷 Change
-          </label>
-          <button type="button" className="photo-remove-btn" onClick={() => onChange(null)}>
-            ✕ Remove
-          </button>
-        </div>
-      </div>
-    );
+  function removePhoto(i) {
+    const updated = photoArr.filter((_,idx)=>idx!==i);
+    onChange(updated);
+  }
+
+  function setHero(i) {
+    // Move photo i to index 0
+    const updated = [photoArr[i], ...photoArr.filter((_,idx)=>idx!==i)];
+    onChange(updated);
   }
 
   return (
-    <label className="photo-upload-label">
-      <input type="file" accept="image/*" onChange={handleChange} />
-      <span className="photo-upload-icon">{loading ? "⏳" : "📷"}</span>
-      <span className="photo-upload-text">{loading ? "Processing…" : "Tap to add a photo"}</span>
-      <span className="photo-upload-sub">Opens your camera roll or gallery</span>
-    </label>
+    <div>
+      {photoArr.length > 0 && (
+        <div className="photo-gallery">
+          {photoArr.map((p,i) => (
+            <div key={i} className="photo-thumb-wrap">
+              <img src={p} alt={`Photo ${i+1}`} className={`photo-thumb${i===0?" photo-thumb-hero":""}`} />
+              {i === 0 && <div className="photo-thumb-hero-label">Cover</div>}
+              {i > 0 && <button className="photo-set-hero-btn" onClick={()=>setHero(i)} title="Set as cover">★</button>}
+              <button className="photo-thumb-remove" onClick={()=>removePhoto(i)} title="Remove">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <label className="photo-upload-label">
+        <input type="file" accept="image/*" multiple onChange={handleAdd} />
+        <span className="photo-upload-icon">{loading ? "⏳" : "📷"}</span>
+        <span className="photo-upload-text">{loading ? "Processing…" : photoArr.length > 0 ? "Add more photos" : "Tap to add photos"}</span>
+        <span className="photo-upload-sub">{photoArr.length > 0 ? `${photoArr.length} photo${photoArr.length>1?"s":""} · tap ★ to set cover` : "Select one or more · tap ★ to set cover"}</span>
+      </label>
+    </div>
   );
 }
 
@@ -419,6 +435,8 @@ function normalizeRecipe(r) {
     carbs: r.carbs ? Number(r.carbs) : null,
     fat: r.fat ? Number(r.fat) : null,
     fiber: r.fiber ? Number(r.fiber) : null,
+    photo: r.photo || (Array.isArray(r.photos) && r.photos[0]) || null,
+    photos: Array.isArray(r.photos) ? r.photos : (r.photo ? [r.photo] : []),
   };
 }
 
@@ -467,6 +485,9 @@ function RecipeBook() {
   const [dinnerSelection, setDinnerSelection] = useState([]);
   const [dinnerCookMode, setDinnerCookMode] = useState(null);
   const [lightbox, setLightbox] = useState(null);
+  function openLightbox(photo, photos, index) {
+    setLightbox({ src: photo, photos: photos||[photo], index: index||0 });
+  }
   const recipes = data.recipes;
   useEffect(() => { saveData(data); }, [data]);
 
@@ -545,7 +566,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={setLightbox} onToggleFavorite={toggleFavorite} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{upsertRecipe(r);setTab("library");}} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
         {tab==="import" && <ImportTab onImport={r=>{ upsertRecipe(r); setEditRecipe(r); setTab("library"); }} />}
@@ -563,7 +584,7 @@ function RecipeBook() {
       }} onReplace={imported=>{
         setData(d=>({...d, recipes:imported}));
       }} onClose={()=>setShowSync(false)} />}
-      {lightbox && <div className="lightbox" onClick={()=>setLightbox(null)}><button className="lightbox-close" onClick={()=>setLightbox(null)}>✕</button><img src={lightbox} alt="Recipe" onClick={e=>e.stopPropagation()} /></div>}
+      {lightbox && <Lightbox photos={lightbox.photos||[lightbox.src||lightbox]} startIndex={lightbox.index||0} onClose={()=>setLightbox(null)} />}
     </>
   );
 }
@@ -596,10 +617,15 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <div className="recipe-grid">
           {recipes.map(r=>(
             <div key={r.id} className="recipe-card" onClick={()=>{setSelectedRecipe(r); window.history.pushState({recipe:true}, '');}}>
-              {r.photo
-                ? <img src={r.photo} alt={r.title} className="recipe-card-photo" />
-                : <div className="recipe-card-photo-placeholder">{recipeEmoji(r)}</div>
-              }
+              {(() => {
+                const photos = r.photos && r.photos.length > 0 ? r.photos : (r.photo ? [r.photo] : []);
+                return photos.length > 0
+                  ? <div style={{position:"relative"}}>
+                      <img src={photos[0]} alt={r.title} className="recipe-card-photo" />
+                      {photos.length > 1 && <div style={{position:"absolute",bottom:6,right:6,background:"rgba(0,0,0,0.55)",color:"white",borderRadius:10,padding:"2px 7px",fontSize:11,fontWeight:700}}>📷 {photos.length}</div>}
+                    </div>
+                  : <div className="recipe-card-photo-placeholder">{recipeEmoji(r)}</div>;
+              })()}
               <div className="recipe-card-body">
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
                   <div className="recipe-card-title">{r.title}</div>
@@ -628,6 +654,36 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
 }
 
 // ── Recipe Detail ──────────────────────────────────────────────────────────
+function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
+  const photos = safe.photos && safe.photos.length > 0 ? safe.photos : (safe.photo ? [safe.photo] : []);
+  const [current, setCurrent] = useState(0);
+  const photo = photos[current] || null;
+
+  return (
+    <div className="detail-hero">
+      {photo
+        ? <img src={photo} alt={safe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in",display:"block"}} onClick={()=>onLightbox(photo, photos, current)} />
+        : <div className="detail-hero-placeholder" style={{height:"220px"}}>{recipeEmoji(safe)}</div>
+      }
+      <div className="detail-hero-overlay" />
+      <div className="detail-hero-actions">
+        <button className="detail-hero-btn detail-hero-btn-primary" onClick={onCook}>▶ Cook</button>
+        <button className="detail-hero-btn detail-hero-btn-light" onClick={onEdit}>Edit</button>
+        <button className="detail-hero-btn detail-hero-btn-danger" onClick={onDelete}>Delete</button>
+      </div>
+      {photos.length > 1 && (
+        <div style={{position:"absolute",bottom:12,left:"50%",transform:"translateX(-50%)",display:"flex",gap:6,alignItems:"center"}}>
+          <button className="lightbox-prev" style={{position:"static",transform:"none",padding:"6px 10px",fontSize:18}} onClick={e=>{e.stopPropagation();setCurrent(i=>Math.max(0,i-1));}}>‹</button>
+          {photos.map((_,i)=>(
+            <div key={i} onClick={e=>{e.stopPropagation();setCurrent(i);}} style={{width:8,height:8,borderRadius:"50%",background:i===current?"white":"rgba(255,255,255,0.4)",cursor:"pointer",transition:"background 0.2s"}} />
+          ))}
+          <button className="lightbox-prev" style={{position:"static",transform:"none",padding:"6px 10px",fontSize:18}} onClick={e=>{e.stopPropagation();setCurrent(i=>Math.min(photos.length-1,i+1));}}>›</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite}) {
   const safe = {
     ...recipe,
@@ -662,18 +718,7 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
     <div>
       <div style={{marginBottom:16}}><button className="btn btn-ghost btn-sm" onClick={()=>{window.history.back();}}>← Back to Library</button></div>
       <div className="detail-panel">
-        <div className="detail-hero">
-          {safe.photo
-            ? <img src={safe.photo} alt={safe.title} style={{width:"100%",height:"100%",objectFit:"cover",cursor:"zoom-in",display:"block"}} onClick={()=>onLightbox(safe.photo)} />
-            : <div className="detail-hero-placeholder" style={{height:"220px"}}>{recipeEmoji(safe)}</div>
-          }
-          <div className="detail-hero-overlay" />
-          <div className="detail-hero-actions">
-            <button className="detail-hero-btn detail-hero-btn-primary" onClick={()=>onCook(safe)}>▶ Cook</button>
-            <button className="detail-hero-btn detail-hero-btn-light" onClick={()=>onEdit(safe)}>Edit</button>
-            <button className="detail-hero-btn detail-hero-btn-danger" onClick={()=>onDelete(safe.id)}>Delete</button>
-          </div>
-        </div>
+        <DetailHero safe={safe} onCook={()=>onCook(safe)} onEdit={()=>onEdit(safe)} onDelete={()=>onDelete(safe.id)} onLightbox={onLightbox} />
 
         <div className="detail-content">
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -798,6 +843,25 @@ function matchIngredients(stepText, ingredients) {
     const keywords = extractKeywords(ing);
     return keywords.some(kw => new RegExp("\\b" + kw, "i").test(stepLower));
   });
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────────
+function Lightbox({photos, startIndex, onClose}) {
+  const [idx, setIdx] = useState(startIndex||0);
+  const photo = photos[idx];
+  return (
+    <div className="lightbox" onClick={onClose}>
+      <button className="lightbox-close" onClick={onClose}>✕</button>
+      <img src={photo} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:"95vw",maxHeight:"85vh",objectFit:"contain",borderRadius:4}} />
+      {photos.length > 1 && (
+        <>
+          <button className="lightbox-prev" onClick={e=>{e.stopPropagation();setIdx(i=>Math.max(0,i-1));}} style={{opacity:idx===0?0.3:1}}>‹</button>
+          <button className="lightbox-next" onClick={e=>{e.stopPropagation();setIdx(i=>Math.min(photos.length-1,i+1));}} style={{opacity:idx===photos.length-1?0.3:1}}>›</button>
+          <div className="lightbox-counter">{idx+1} / {photos.length}</div>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ── Cook Mode ──────────────────────────────────────────────────────────────
@@ -1438,6 +1502,101 @@ function parseStashcook(text) {
 }
 
 
+
+// ── Recipe URL fetcher ────────────────────────────────────────────────────
+async function fetchRecipeFromUrl(url) {
+  const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+  const res = await fetch(proxyUrl);
+  if (!res.ok) throw new Error("Could not fetch that page");
+  const data = await res.json();
+  const html = data.contents;
+  if (!html) throw new Error("Empty page");
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  // Try JSON-LD schema first
+  const scripts = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'));
+  for (const script of scripts) {
+    try {
+      const json = JSON.parse(script.textContent);
+      const items = Array.isArray(json) ? json : (json["@graph"] ? json["@graph"] : [json]);
+      for (const item of items) {
+        const type = item["@type"];
+        const isRecipe = type === "Recipe" || (Array.isArray(type) && type.includes("Recipe"));
+        if (isRecipe) return parseRecipeSchema(item, url);
+      }
+    } catch(e) {}
+  }
+
+  // Try microdata fallback
+  const schemaEl = doc.querySelector('[itemtype*="schema.org/Recipe"]');
+  if (schemaEl) return parseMicrodata(schemaEl, url);
+
+  throw new Error("no_schema");
+}
+
+function parseRecipeSchema(schema, sourceUrl) {
+  function getText(val) {
+    if (!val) return "";
+    if (typeof val === "string") return val.replace(/<[^>]+>/g,"").trim();
+    if (Array.isArray(val)) return getText(val[0]);
+    if (typeof val === "object") return getText(val.text || val.name || val["@value"] || "");
+    return String(val);
+  }
+  function getList(val) {
+    if (!val) return [];
+    return (Array.isArray(val) ? val : [val]).map(getText).filter(Boolean);
+  }
+  function parseDuration(iso) {
+    if (!iso) return 0;
+    const m = String(iso).match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+    if (!m) return parseInt(iso) || 0;
+    return (parseInt(m[1]||0)*60) + parseInt(m[2]||0);
+  }
+  function extractNum(s) { return s ? parseInt(String(s).replace(/[^0-9]/g,""))||null : null; }
+  const n = schema.nutrition || {};
+  return normalizeRecipe({
+    id: uid(), photo: null, photos: [], diets: [], categories: [],
+    title: getText(schema.name) || "Imported Recipe",
+    description: getText(schema.description),
+    cuisine: getText(schema.recipeCuisine),
+    tags: getList(schema.keywords).join(",").split(",").map(s=>s.trim()).filter(Boolean).slice(0,8),
+    servings: parseInt(getText(schema.recipeYield)) || 4,
+    prepTime: parseDuration(schema.prepTime),
+    cookTime: parseDuration(schema.cookTime),
+    ingredients: getList(schema.recipeIngredient),
+    steps: getList(schema.recipeInstructions),
+    calories: extractNum(n.calories),
+    protein: extractNum(n.proteinContent),
+    carbs: extractNum(n.carbohydrateContent),
+    fat: extractNum(n.fatContent),
+    fiber: extractNum(n.fiberContent),
+    sugar: extractNum(n.sugarContent),
+    sodium: extractNum(n.sodiumContent),
+    source: sourceUrl,
+  });
+}
+
+function parseMicrodata(el, sourceUrl) {
+  function prop(name) {
+    return Array.from(el.querySelectorAll('[itemprop="' + name + '"]'))
+      .map(e => (e.getAttribute("content") || e.textContent).trim()).filter(Boolean);
+  }
+  return normalizeRecipe({
+    id: uid(), photo: null, photos: [], diets: [], categories: [], tags: [],
+    title: prop("name")[0] || "Imported Recipe",
+    description: prop("description")[0] || "",
+    cuisine: prop("recipeCuisine")[0] || "",
+    servings: parseInt(prop("recipeYield")[0]) || 4,
+    prepTime: 0, cookTime: 0,
+    ingredients: prop("recipeIngredient"),
+    steps: prop("recipeInstructions"),
+    source: sourceUrl,
+  });
+}
+
+
 // ── Import Tab ─────────────────────────────────────────────────────────────
 function ImportTab({onImport}) {
   const [mode,setMode] = useState("stashcook");
@@ -1448,16 +1607,35 @@ function ImportTab({onImport}) {
   const [error,setError] = useState("");
   const [imported,setImported] = useState([]);
   function handleStashcookParse() { setError("");setResult(null); const r=parseStashcook(pasteText); if(r)setResult(r); else setError("Couldn't parse. Make sure it's a full Stashcook share."); }
-  async function handleAIParse(inputText,isUrl) {
-    setError("");setResult(null);setLoading(true);
+  async function handleUrlImport(url) {
+    setError(""); setResult(null); setLoading(true);
     try {
-      const prompt = `Parse this ${isUrl?"recipe URL":"recipe text"} into structured JSON:\n${inputText}\n\nReturn ONLY JSON:\n{"title":"","cuisine":"","servings":4,"prepTime":0,"cookTime":0,"description":"","tags":[],"diets":[],"calories":null,"protein":null,"carbs":null,"fat":null,"fiber":null,"ingredients":[],"steps":[]}`;
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
-      const data=await res.json();
-      const parsed=JSON.parse(data.content?.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim());
+      // First try schema.org extraction (works on most major recipe sites)
+      const recipe = await fetchRecipeFromUrl(url);
+      setResult(recipe);
+    } catch(e) {
+      if (e.message === "no_schema") {
+        setError("This page doesn't have structured recipe data. Try copying the recipe text and using Paste Any Recipe instead.");
+      } else {
+        setError("Could not load that URL. Make sure it's a public recipe page and try again.");
+      }
+    }
+    setLoading(false);
+  }
+
+  async function handleAIParse(inputText) {
+    setError(""); setResult(null); setLoading(true);
+    try {
+      const prompt = "Parse this recipe text into structured JSON. Return ONLY the JSON object.\n\nRequired fields: title, cuisine, servings (number), prepTime (number), cookTime (number), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts), steps (array of strings).\n\nRecipe text:\n" + inputText;
+      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,messages:[{role:"user",content:prompt}]})});
+      const data = await res.json();
+      const text = data.content?.map(b=>b.text||"").join("") || "";
+      const clean = text.replace(/```json|```/g,"").trim();
+      const start = clean.indexOf("{"), end = clean.lastIndexOf("}");
+      const parsed = JSON.parse(clean.slice(start, end+1));
       if(!parsed.title||!parsed.steps?.length) throw new Error();
-      setResult(normalizeRecipe({...parsed,id:uid(),photo:null}));
-    } catch { setError("Couldn't parse. Try paste mode or check the URL is public."); }
+      setResult(normalizeRecipe({...parsed, id:uid(), photo:null, photos:[]}));
+    } catch { setError("Couldn't parse that text. Make sure it contains a full recipe."); }
     finally { setLoading(false); }
   }
   function saveResult() { if(!result) return; onImport(result); setImported(p=>[...p,result.title]); setResult(null); setPasteText(""); setUrlInput(""); }
@@ -1472,8 +1650,19 @@ function ImportTab({onImport}) {
       </div>
       <div className="ai-panel">
         {mode==="stashcook" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>In Stashcook: open recipe → <strong>Share</strong> → <strong>Share as text</strong>. Paste below.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontFamily:'monospace',fontSize:13}} placeholder="Classic Steakhouse Mustard Sauce..." value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={handleStashcookParse} disabled={!pasteText.trim()}>Parse Recipe</button></div>)}
-        {mode==="url" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe URL. AI will extract and estimate nutrition.</p><div className="ai-input-row" style={{marginBottom:8}}><input className="ai-input" placeholder="https://..." value={urlInput} onChange={e=>{setUrlInput(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(urlInput,true)} disabled={!urlInput.trim()||loading}>{loading?"…":"Import"}</button></div><p className="text-muted">Paywalled sites may not work.</p></div>)}
-        {mode==="text" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe text. AI will structure it.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontSize:13}} placeholder="Paste recipe in any format…" value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(pasteText,false)} disabled={!pasteText.trim()||loading}>{loading?"Parsing…":"Parse with AI"}</button></div>)}
+        {mode==="url" && (
+          <div>
+            <p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>
+              Paste any recipe URL from sites like AllRecipes, Food Network, Serious Eats, NYT Cooking, Bon Appétit, and thousands more. Most major recipe sites work automatically.
+            </p>
+            <div className="ai-input-row" style={{marginBottom:8}}>
+              <input className="ai-input" placeholder="https://www.allrecipes.com/recipe/..." value={urlInput} onChange={e=>{setUrlInput(e.target.value);setError("");setResult(null);}} />
+              <button className="btn btn-primary" onClick={()=>handleUrlImport(urlInput)} disabled={!urlInput.trim()||loading}>{loading?"Fetching…":"Import"}</button>
+            </div>
+            <p className="text-muted">Paywalled sites (NYT Cooking, etc.) may not work. Try Paste Any Recipe as a fallback.</p>
+          </div>
+        )}
+        {mode==="text" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe text. AI will structure it.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontSize:13}} placeholder="Paste recipe in any format…" value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(pasteText)} disabled={!pasteText.trim()||loading}>{loading?"Parsing…":"Parse with AI"}</button></div>)}
         {error && <div style={{marginTop:16,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {error}</div>}
         {result && (
           <div style={{marginTop:20,background:'var(--parchment-dark)',borderRadius:4,padding:20}}>
@@ -1494,7 +1683,7 @@ function ImportTab({onImport}) {
 
 // ── Recipe Modal (Add / Edit) ──────────────────────────────────────────────
 function RecipeModal({recipe,onSave,onClose}) {
-  const blank = {id:uid(),title:"",cuisine:"",categories:[],servings:4,prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
+  const blank = {id:uid(),title:"",cuisine:"",categories:[],servings:4,photos:[],prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
   const [form,setForm] = useState(recipe ? {
     ...recipe,
     tags: Array.isArray(recipe.tags)?recipe.tags.join(", "):recipe.tags||"",
@@ -1503,7 +1692,7 @@ function RecipeModal({recipe,onSave,onClose}) {
     diets: recipe.diets||[],
     calories:recipe.calories||"",protein:recipe.protein||"",carbs:recipe.carbs||"",
     fat:recipe.fat||"",fiber:recipe.fiber||"",sugar:recipe.sugar||"",sodium:recipe.sodium||"",
-    photo:recipe.photo||null,
+    photos: recipe.photos ? recipe.photos : (recipe.photo ? [recipe.photo] : []),
     categories:recipe.categories||[],
   } : blank);
 
@@ -1516,6 +1705,8 @@ function RecipeModal({recipe,onSave,onClose}) {
       calories:form.calories?+form.calories:null, protein:form.protein?+form.protein:null,
       carbs:form.carbs?+form.carbs:null, fat:form.fat?+form.fat:null,
       fiber:form.fiber?+form.fiber:null, sugar:form.sugar?+form.sugar:null, sodium:form.sodium?+form.sodium:null,
+      photos: Array.isArray(form.photos) ? form.photos : [],
+      photo: Array.isArray(form.photos) && form.photos.length > 0 ? form.photos[0] : null,
       tags:form.tags.split(",").map(t=>t.trim()).filter(Boolean),
       ingredients:form.ingredients.split("\n").map(s=>s.trim()).filter(Boolean),
       steps:form.steps.split("\n").map(s=>s.trim()).filter(Boolean),
@@ -1531,7 +1722,7 @@ function RecipeModal({recipe,onSave,onClose}) {
 
         <div className="form-section">Photo</div>
         <div className="form-group">
-          <PhotoUpload value={form.photo} onChange={v=>set("photo",v)} />
+          <PhotoUpload photos={form.photos||[]} onChange={v=>set("photos",v)} />
         </div>
 
         <div className="form-section">Details</div>
