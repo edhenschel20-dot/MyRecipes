@@ -415,10 +415,12 @@ function normalizeRecipe(r) {
     if (!ing) return "";
     if (typeof ing === "string") return ing;
     if (typeof ing === "object") {
-      const amt = ing.amount != null ? ing.amount : "";
-      const unit = ing.unit || ing.measurement || "";
-      const name = ing.name || ing.ingredient || ing.item || ing.description || "";
-      return [amt, unit, name].filter(Boolean).join(" ").trim();
+      const amt = ing.amount != null ? String(ing.amount).trim() : "";
+      const unit = (ing.unit || ing.measurement || "").trim();
+      const name = (ing.name || ing.ingredient || ing.item || ing.description || "").trim();
+      // Skip unit if it's "whole" or empty — just use amount + name
+      const unitClean = ["whole","piece","pieces"].includes(unit.toLowerCase()) ? "" : unit;
+      return [amt, unitClean, name].filter(Boolean).join(" ").trim();
     }
     return String(ing);
   }
@@ -1358,7 +1360,7 @@ Start your response with { and end with }. No other text.`;
       if(!norm.title||norm.title==="Untitled") throw new Error("No title found");
       if(!norm.steps||!norm.steps.length) throw new Error("No steps found");
       setResult(norm);
-    } catch(e) { setRecipeError("Could not parse: "+e.message+". Make sure you copied the full JSON."); }
+    } catch(e) { setRecipeError("Could not parse: " + e.message + ". If pasting from Claude, make sure you copy only the JSON (starting with { and ending with })."); }
   }
 
   function saveResult() {
