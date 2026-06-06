@@ -1905,26 +1905,44 @@ function ImportTab({onImport}) {
 
   async function handleAIParse(inputText) {
     setError(""); setResult(null); setLoading(true);
+    // Detect JSON and parse directly — no AI needed
+    const trimmed = inputText.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const s = trimmed.indexOf("{"), e = trimmed.lastIndexOf("}");
+        const parsed = JSON.parse(s !== -1 ? trimmed.slice(s, e+1) : trimmed);
+        const norm = normalizeRecipe({...parsed, id:uid(), photo:null, photos:[]});
+        if (!norm.title || norm.title === "Untitled") throw new Error("No title found");
+        if (!norm.steps || !norm.steps.length) throw new Error("No steps found");
+        setResult(norm);
+        setLoading(false);
+        return;
+      } catch(jsonErr) {
+        // fall through to AI
+      }
+    }
     try {
       const prompt = "Parse this recipe text into structured JSON. Return ONLY the JSON object.\n\nRequired fields: title, cuisine, servings (number), prepTime (number), cookTime (number), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts), steps (array of strings).\n\nRecipe text:\n" + inputText;
       const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,messages:[{role:"user",content:prompt}]})});
       const data = await res.json();
       const text = data.content?.map(b=>b.text||"").join("") || "";
       const clean = text.replace(/```json|```/g,"").trim();
-      const start = clean.indexOf("{"), end = clean.lastIndexOf("}");
-      const parsed = JSON.parse(clean.slice(start, end+1));
-      // flexible - normalizeRecipe handles field variations
-      setResult(normalizeRecipe({...parsed, id:uid(), photo:null, photos:[]}));
-    } catch { setError("Couldn't parse that text. Make sure it contains a full recipe."); }
+      const start = clean.indexOf("{"), end2 = clean.lastIndexOf("}");
+      const parsed = JSON.parse(clean.slice(start, end2+1));
+      const norm = normalizeRecipe({...parsed, id:uid(), aiGenerated:true, photo:null, photos:[]});
+      if(!norm.title||!norm.steps?.length) throw new Error();
+      setResult(norm);
+    } catch(e) { setError("Couldn't parse that text. Make sure it contains a full recipe."); }
     finally { setLoading(false); }
   }
+
   function saveResult() { if(!result) return; onImport(result); setImported(p=>[...p,result.title]); setResult(null); setPasteText(""); setUrlInput(""); }
   return (
     <div>
       <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>Import Recipes</div>
       <p className="text-muted" style={{marginBottom:24}}>Bring in recipes from Stashcook, a URL, or any copied text. Add photos after saving.</p>
       <div style={{display:'flex',gap:8,marginBottom:24,flexWrap:'wrap'}}>
-        {[["stashcook","📲 Stashcook Share"],["url","🔗 From URL"],["text","📋 Paste Any Recipe"]].map(([id,label])=>(
+        {[["stashcook","📲 Stashcook Share"],["url","🔗 From URL"],["text","📋 Paste Any Recipe"],["json","{ } Paste JSON"]].map(([id,label])=>(
           <button key={id} className={`btn ${mode===id?"btn-primary":"btn-outline"} btn-sm`} onClick={()=>{setMode(id);setResult(null);setError("");}}>{label}</button>
         ))}
       </div>
@@ -1942,7 +1960,23 @@ function ImportTab({onImport}) {
             <p className="text-muted">Paywalled sites (NYT Cooking, etc.) may not work. Try Paste Any Recipe as a fallback.</p>
           </div>
         )}
-        {mode==="text" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe text. AI will structure it.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontSize:13}} placeholder="Paste recipe in any format…" value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(pasteText)} disabled={!pasteText.trim()||loading}>{loading?"Parsing…":"Parse with AI"}</button></div>)}
+        {mode==="text" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe — plain text, JSON from Claude, or any format. JSON is parsed instantly; other text is sent to AI.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontSize:13}} placeholder="Paste recipe in any format…" value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(pasteText)} disabled={!pasteText.trim()||loading}>{loading?"Parsing…":pasteText.trim().startsWith("{")?"Parse & Preview":"Parse with AI"}</button></div>)}
+        {mode==="json" && (
+          <div>
+            <p style={{fontSize:14,marginBottom:8,lineHeight:1.6}}>Paste raw JSON from Claude — any format works. No wizard needed.</p>
+            <p style={{fontSize:12,color:"var(--ink-light)",marginBottom:12}}>In Claude ask: <em>"Give me a full recipe for X as a JSON object"</em> — copy the whole response and paste below.</p>
+            <textarea
+              className="ai-input form-textarea"
+              style={{width:"100%",minHeight:200,marginBottom:12,fontSize:12,fontFamily:"monospace",display:"block"}}
+              placeholder='{ "name": "Recipe Name", "ingredients": [...], "steps": [...] }'
+              value={pasteText}
+              onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}}
+            />
+            <button className="btn btn-primary" onClick={()=>handleAIParse(pasteText)} disabled={!pasteText.trim()||loading}>
+              {loading?"Parsing…":"Parse & Preview"}
+            </button>
+          </div>
+        )}
         {error && <div style={{marginTop:16,padding:'10px 14px',background:'#fde8e4',border:'1px solid var(--rust)',borderRadius:3,fontSize:13,color:'var(--rust)'}}>⚠️ {error}</div>}
         {result && (
           <div style={{marginTop:20,background:'var(--parchment-dark)',borderRadius:4,padding:20}}>
