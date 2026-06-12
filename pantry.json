@@ -5,7 +5,7 @@
     "category": "Other",
     "quantity": "",
     "notes": "",
-    "status": "low"
+    "status": "out"
   },
   {
     "id": "p79qj52y",
@@ -22,5 +22,13 @@
     "quantity": "",
     "notes": "",
     "status": "have"
+  },
+  {
+    "id": "pemtxu3z",
+    "name": "Thyme",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "",
+    "notes": ""
   }
 ]
