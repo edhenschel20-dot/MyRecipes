@@ -2984,7 +2984,12 @@ function CalendarTab({ recipes }) {
                   <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:SLOT_COLORS[slot],marginBottom:2}}>
                     {MEAL_LABELS[slot].split(" ")[1]}
                   </div>
-                  {recipe?(
+                  {entry&&!recipe?(
+                    // Entry exists but recipe not found — show warning with clear option
+                    <div style={{fontSize:13,color:"var(--rust)",fontStyle:"italic"}}>
+                      ⚠ Recipe not found (deleted or not synced)
+                    </div>
+                  ):recipe?(
                     <div>
                       <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                         {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 5px",borderRadius:10,marginRight:5,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
@@ -3012,7 +3017,7 @@ function CalendarTab({ recipes }) {
                   <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:dk,slot})}>
                     {recipe?"Change":"+ Add"}
                   </button>
-                  {recipe&&<button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>clearMeal(dk,slot)}>✕</button>}
+                  {(recipe||entry)&&<button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>clearMeal(dk,slot)}>✕</button>}
                 </div>
               </div>
             );
@@ -3091,6 +3096,7 @@ function CalendarTab({ recipes }) {
       {/* ── MONTH VIEW ── */}
       {viewMode==="month"&&(
         <>
+          {selectedDay&&<div id='day-panel' style={{marginBottom:12}}><DayPanel dk={selectedDay}/></div>}
           <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
             {DAY_NAMES.map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:"var(--ink-light)",padding:"4px 0",textTransform:"uppercase"}}>{d}</div>)}
           </div>
@@ -3106,7 +3112,10 @@ function CalendarTab({ recipes }) {
               const dayCals=prefs.trackingEnabled?getDayTotalCals(dayData,recipes):null;
               const overGoal=prefs.trackingEnabled&&prefs.dailyGoal&&dayCals>prefs.dailyGoal;
               return (
-                <div key={day} onClick={()=>setSelectedDay(isSelected?null:dk)}
+                <div key={day} onClick={()=>{
+                    setSelectedDay(isSelected?null:dk);
+                    if(!isSelected) setTimeout(()=>document.getElementById('day-panel')?.scrollIntoView({behavior:'smooth',block:'start'}),50);
+                  }}
                   style={{border:isSelected?"2px solid var(--saffron)":isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
                     borderRadius:6,padding:"6px 4px",minHeight:64,cursor:"pointer",
                     background:isSelected?"rgba(212,137,26,0.08)":isToday?"var(--parchment-dark)":"var(--cream)",
@@ -3131,7 +3140,6 @@ function CalendarTab({ recipes }) {
               );
             })}
           </div>
-          {selectedDay&&<DayPanel dk={selectedDay}/>}
           {!selectedDay&&<div style={{textAlign:"center",padding:"12px 0",color:"var(--ink-light)",fontSize:13}}>Tap a day to view or plan meals</div>}
         </>
       )}
@@ -3147,7 +3155,10 @@ function CalendarTab({ recipes }) {
               const isSelected=dk===selectedDay;
               const hasMeals=MEAL_SLOTS.some(s=>calData[dk]?.[s]);
               return (
-                <div key={dk} onClick={()=>setSelectedDay(isSelected?null:dk)}
+                <div key={dk} onClick={()=>{
+                    setSelectedDay(isSelected?null:dk);
+                    if(!isSelected) setTimeout(()=>document.getElementById('day-panel')?.scrollIntoView({behavior:'smooth',block:'start'}),50);
+                  }}
                   style={{textAlign:"center",padding:"8px 4px",borderRadius:6,cursor:"pointer",
                     background:isSelected?"rgba(212,137,26,0.08)":isToday?"var(--parchment-dark)":"var(--cream)",
                     border:isSelected?"2px solid var(--saffron)":isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
