@@ -458,23 +458,20 @@ async function githubPutFile(token, repo, path, content, sha, message) {
 async function syncToGitHub(prefs, data, pantry, calendar) {
   const { token, repo } = prefs;
   if (!token || !repo) return;
+  // Write files sequentially to avoid SHA conflicts
   try {
-    // Get current SHAs
-    const [rFile, pFile, cFile] = await Promise.all([
-      githubGetFile(token, repo, "data/recipes.json"),
-      githubGetFile(token, repo, "data/pantry.json"),
-      githubGetFile(token, repo, "data/calendar.json"),
-    ]);
-    await Promise.all([
-      githubPutFile(token, repo, "data/recipes.json", data, rFile.sha, "Update recipes"),
-      githubPutFile(token, repo, "data/pantry.json", pantry, pFile.sha, "Update pantry"),
-      githubPutFile(token, repo, "data/calendar.json", calendar, cFile.sha, "Update calendar"),
-    ]);
-    return true;
-  } catch(e) {
-    console.error("GitHub sync failed:", e);
-    throw e;
-  }
+    const rFile = await githubGetFile(token, repo, "data/recipes.json");
+    await githubPutFile(token, repo, "data/recipes.json", data, rFile.sha, "Update recipes");
+  } catch(e) { console.error("recipes sync failed:", e.message); throw e; }
+  try {
+    const pFile = await githubGetFile(token, repo, "data/pantry.json");
+    await githubPutFile(token, repo, "data/pantry.json", pantry, pFile.sha, "Update pantry");
+  } catch(e) { console.error("pantry sync failed:", e.message); throw e; }
+  try {
+    const cFile = await githubGetFile(token, repo, "data/calendar.json");
+    await githubPutFile(token, repo, "data/calendar.json", calendar, cFile.sha, "Update calendar");
+  } catch(e) { console.error("calendar sync failed:", e.message); throw e; }
+  return true;
 }
 
 async function loadFromGitHub(prefs) {
@@ -578,8 +575,23 @@ function GitHubSettingsModal({ onClose, onSaved }) {
 
         {prefs.enabled && (
           <div style={{marginTop:16,padding:"12px 14px",background:"var(--parchment-dark)",borderRadius:4,fontSize:13}}>
-            <div style={{fontWeight:700,marginBottom:4}}>✓ Sync is active</div>
-            <div style={{color:"var(--ink-light)"}}>Your data syncs to GitHub on every save. Claude can update your recipes, pantry, and calendar directly from chat when you share your repo name.</div>
+            <div style={{fontWeight:700,marginBottom:8}}>✓ Sync is active</div>
+            <div style={{color:"var(--ink-light)",marginBottom:12}}>Data syncs to GitHub on every save. Files are stored in <code>data/</code> folder of your repo.</div>
+            <button className="btn btn-outline btn-sm" onClick={async()=>{
+              setSyncing(true); setStatus("");
+              try {
+                const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
+                const pantryData = JSON.parse(localStorage.getItem("recipebook_pantry_v1")||"[]");
+                const calData = JSON.parse(localStorage.getItem("recipebook_calendar_v1")||"{}");
+                await syncToGitHub({token,repo}, recipeData, pantryData, calData);
+                setStatus("ok:✓ Synced! Check the data/ folder in your repo.");
+              } catch(e) {
+                setStatus("err:Sync failed: " + e.message);
+              }
+              setSyncing(false);
+            }} disabled={syncing}>
+              {syncing ? "Syncing…" : "⟳ Sync Now"}
+            </button>
           </div>
         )}
       </div>
