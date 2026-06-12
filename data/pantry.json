@@ -1,0 +1,26 @@
+[
+  {
+    "id": "pbl1q4jq",
+    "name": "Panko",
+    "category": "Other",
+    "quantity": "",
+    "notes": "",
+    "status": "low"
+  },
+  {
+    "id": "p79qj52y",
+    "name": "Spaghetti ",
+    "category": "Grains & Pasta",
+    "quantity": "4 boxes",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "pwvu3wf7",
+    "name": "Dried Basil",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  }
+]
