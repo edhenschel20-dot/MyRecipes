@@ -2874,6 +2874,7 @@ function CalendarTab({ recipes }) {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [viewMode, setViewMode] = useState("month"); // "month" | "week"
   const [selectedDay, setSelectedDay] = useState(null);
   const [assignModal, setAssignModal] = useState(null);
   const [showGoalEdit, setShowGoalEdit] = useState(false);
@@ -2881,11 +2882,11 @@ function CalendarTab({ recipes }) {
 
   useEffect(()=>{
     saveCalendar(calData);
-    const prefs = loadGitHubPrefs();
-    if (prefs.enabled && prefs.token) {
+    const prefs2 = loadGitHubPrefs();
+    if (prefs2.enabled && prefs2.token) {
       const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
       const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
-      syncToGitHub(prefs, recipeData, pantry, calData).catch(()=>{});
+      syncToGitHub(prefs2, recipeData, pantry, calData).catch(()=>{});
     }
   },[calData]);
   useEffect(()=>{ saveCalPrefs(prefs); },[prefs]);
@@ -2915,45 +2916,132 @@ function CalendarTab({ recipes }) {
     setCalData(d=>({...d,[dk]:{...(d[dk]||{}),[slot]:{...(d[dk]?.[slot]||{}),servings}}}));
   }
 
-  const firstDay=new Date(viewYear,viewMonth,1).getDay();
-  const daysInMonth=new Date(viewYear,viewMonth+1,0).getDate();
   const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
   const DAY_NAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   const today_key=todayKey();
-  const selectedDayData=selectedDay?(calData[selectedDay]||{}):null;
-  const dayTotalCals=selectedDay?getDayTotalCals(selectedDayData,recipes):null;
   const tonightDinner=calData[today_key]?.dinner;
   const tonightRecipe=tonightDinner?recipes.find(r=>r.id===tonightDinner.id):null;
 
-  // Weekly calorie summary
-  function getWeekSummary() {
-    const days=[]; const start=new Date(viewYear,viewMonth,1);
+  // Get the week containing today or selected day
+  function getWeekDays(anchorDate) {
+    const d = new Date(anchorDate);
+    const day = d.getDay();
+    const days = [];
     for(let i=0;i<7;i++){
-      const d=new Date(); d.setDate(d.getDate()-d.getDay()+i);
-      const dk=dateKey(d.getFullYear(),d.getMonth(),d.getDate());
-      const total=getDayTotalCals(calData[dk]||{},recipes);
-      days.push({dk,label:DAY_NAMES[i],total});
+      const wd = new Date(d);
+      wd.setDate(d.getDate() - day + i);
+      days.push(dateKey(wd.getFullYear(), wd.getMonth(), wd.getDate()));
     }
     return days;
   }
 
+  const [weekAnchor, setWeekAnchor] = useState(()=>{
+    const d = new Date();
+    return dateKey(d.getFullYear(), d.getMonth(), d.getDate());
+  });
+  const weekDays = getWeekDays(weekAnchor);
+
+  function prevWeek() {
+    const d = new Date(weekAnchor+"T12:00:00");
+    d.setDate(d.getDate()-7);
+    setWeekAnchor(dateKey(d.getFullYear(),d.getMonth(),d.getDate()));
+  }
+  function nextWeek() {
+    const d = new Date(weekAnchor+"T12:00:00");
+    d.setDate(d.getDate()+7);
+    setWeekAnchor(dateKey(d.getFullYear(),d.getMonth(),d.getDate()));
+  }
+
+  // Day detail panel — shared between month and week views
+  function DayPanel({dk}) {
+    const dayData = calData[dk]||{};
+    const dayTotalCals = prefs.trackingEnabled ? getDayTotalCals(dayData,recipes) : null;
+    const isToday = dk===today_key;
+    return (
+      <div className="detail-panel" style={{padding:16,marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700}}>
+            {new Date(dk+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
+            {isToday&&<span style={{marginLeft:8,fontSize:11,background:"var(--saffron)",color:"white",padding:"1px 7px",borderRadius:10,fontFamily:"'Lato',sans-serif",fontWeight:700}}>Today</span>}
+          </div>
+          {prefs.trackingEnabled&&dayTotalCals!=null&&(
+            <div style={{fontFamily:"'Special Elite',monospace",fontSize:15,color:prefs.dailyGoal&&dayTotalCals>prefs.dailyGoal?"var(--rust)":"var(--sage)"}}>
+              🔥 {dayTotalCals} cal
+            </div>
+          )}
+        </div>
+        {prefs.trackingEnabled&&<CalorieBar consumed={dayTotalCals||0} goal={prefs.dailyGoal}/>}
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
+          {MEAL_SLOTS.map(slot=>{
+            const entry=dayData[slot];
+            const recipe=entry?recipes.find(r=>r.id===entry.id):null;
+            const mealCals=getMealCals(entry,recipe);
+            return (
+              <div key={slot} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:6,
+                background:"var(--parchment-dark)",border:`2px solid ${entry?SLOT_COLORS[slot]:"transparent"}`}}>
+                <div style={{width:4,height:44,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:SLOT_COLORS[slot],marginBottom:2}}>
+                    {MEAL_LABELS[slot].split(" ")[1]}
+                  </div>
+                  {recipe?(
+                    <div>
+                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 5px",borderRadius:10,marginRight:5,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
+                        {recipe.title}
+                      </div>
+                      {prefs.trackingEnabled&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4,flexWrap:"wrap"}}>
+                          {mealCals!=null&&<span style={{fontSize:12,fontWeight:700,color:"var(--saffron)"}}>🔥 {mealCals} cal</span>}
+                          <div style={{display:"flex",alignItems:"center",gap:4}}>
+                            <span style={{fontSize:11,color:"var(--ink-light)"}}>Servings:</span>
+                            <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+                              onClick={()=>updateServings(dk,slot,Math.max(0.25,(entry.servings||1)-0.25))}>−</button>
+                            <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:"center"}}>{entry.servings||1}</span>
+                            <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+                              onClick={()=>updateServings(dk,slot,(entry.servings||1)+0.25)}>+</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ):(
+                    <div style={{fontSize:13,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned</div>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:dk,slot})}>
+                    {recipe?"Change":"+ Add"}
+                  </button>
+                  {recipe&&<button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>clearMeal(dk,slot)}>✕</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const firstDay=new Date(viewYear,viewMonth,1).getDay();
+  const daysInMonth=new Date(viewYear,viewMonth+1,0).getDate();
+
   return (
     <div>
       {/* Tonight banner */}
-      {tonightRecipe && (
+      {tonightRecipe&&(
         <div style={{background:"var(--saffron)",color:"white",borderRadius:6,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
           <span style={{fontSize:20}}>🌙</span>
           <div style={{flex:1}}>
             <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,opacity:0.85}}>Tonight's Dinner</div>
             <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700}}>{tonightRecipe.title}{tonightDinner.leftover&&" ↩"}</div>
-            {prefs.trackingEnabled&&tonightRecipe.calories&&<div style={{fontSize:12,opacity:0.9}}>🔥 {getMealCals(tonightDinner,tonightRecipe)} cal ({tonightDinner.servings||1} serving{(tonightDinner.servings||1)!==1?"s":""})</div>}
+            {prefs.trackingEnabled&&tonightRecipe.calories&&<div style={{fontSize:12,opacity:0.9}}>🔥 {getMealCals(tonightDinner,tonightRecipe)} cal</div>}
           </div>
         </div>
       )}
 
-      {/* Calorie goal bar */}
-      {prefs.trackingEnabled && (
-        <div style={{background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 16px",marginBottom:16}}>
+      {/* Calorie goal */}
+      {prefs.trackingEnabled&&(
+        <div style={{background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 16px",marginBottom:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:"uppercase",letterSpacing:1,color:"var(--ink-mid)"}}>Today's Calories</div>
             <button className="btn btn-ghost btn-sm" onClick={()=>{setGoalInput(String(prefs.dailyGoal||""));setShowGoalEdit(v=>!v);}}>
@@ -2970,132 +3058,159 @@ function CalendarTab({ recipes }) {
         </div>
       )}
 
-      {/* Tracking toggle */}
-      {!prefs.trackingEnabled && (
-        <div style={{marginBottom:16,textAlign:"right"}}>
-          <button className="btn btn-ghost btn-sm" onClick={()=>setPrefs(p=>({...p,trackingEnabled:true}))}>🔥 Enable calorie tracking</button>
+      {/* View mode toggle + nav */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:8,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:6}}>
+          <button className={`btn btn-sm ${viewMode==="month"?"btn-primary":"btn-outline"}`} onClick={()=>setViewMode("month")}>Month</button>
+          <button className={`btn btn-sm ${viewMode==="week"?"btn-primary":"btn-outline"}`} onClick={()=>setViewMode("week")}>Week</button>
         </div>
-      )}
-      {prefs.trackingEnabled && (
-        <div style={{marginBottom:16,textAlign:"right"}}>
-          <button className="btn btn-ghost btn-sm" onClick={()=>setPrefs(p=>({...p,trackingEnabled:false}))}>Hide calorie tracking</button>
-        </div>
-      )}
-
-      {/* Month nav */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-        <button className="btn btn-ghost btn-sm" onClick={()=>{if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1);}}>‹</button>
-        <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700}}>{MONTH_NAMES[viewMonth]} {viewYear}</div>
-        <button className="btn btn-ghost btn-sm" onClick={()=>{if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1);}}>›</button>
-      </div>
-
-      {/* Day headers */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
-        {DAY_NAMES.map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:"var(--ink-light)",padding:"4px 0",textTransform:"uppercase"}}>{d}</div>)}
-      </div>
-
-      {/* Calendar grid */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:20}}>
-        {Array(firstDay).fill(null).map((_,i)=><div key={"e"+i}/>)}
-        {Array(daysInMonth).fill(null).map((_,i)=>{
-          const day=i+1;
-          const dk=dateKey(viewYear,viewMonth,day);
-          const dayData=calData[dk]||{};
-          const meals=MEAL_SLOTS.filter(s=>dayData[s]);
-          const isToday=dk===today_key;
-          const isSelected=dk===selectedDay;
-          const dayCals=prefs.trackingEnabled?getDayTotalCals(dayData,recipes):null;
-          const overGoal=prefs.trackingEnabled&&prefs.dailyGoal&&dayCals>prefs.dailyGoal;
-          return (
-            <div key={day} onClick={()=>setSelectedDay(isSelected?null:dk)}
-              style={{border:isSelected?"2px solid var(--saffron)":isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
-                borderRadius:6,padding:"6px 4px",minHeight:64,cursor:"pointer",
-                background:isSelected?"rgba(212,137,26,0.08)":isToday?"var(--parchment-dark)":"var(--cream)",
-                transition:"all 0.15s",position:"relative"}}>
-              <div style={{fontFamily:"'Special Elite',monospace",fontSize:13,fontWeight:isToday?700:400,textAlign:"center",
-                color:overGoal?"var(--rust)":isToday?"var(--ink)":"var(--ink-mid)",marginBottom:3}}>{day}</div>
-              {dayCals!=null&&<div style={{textAlign:"center",fontSize:9,fontWeight:700,color:overGoal?"var(--rust)":"var(--sage)",marginBottom:2}}>{dayCals}</div>}
-              <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                {meals.map(slot=>{
-                  const entry=dayData[slot];
-                  const recipe=recipes.find(r=>r.id===entry.id);
-                  return (
-                    <div key={slot} style={{background:SLOT_COLORS[slot],borderRadius:3,padding:"1px 4px",
-                      fontSize:9,color:"white",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
-                      opacity:entry.leftover?0.65:1}}>
-                      {entry.leftover?"↩ ":""}{recipe?recipe.title.slice(0,10)+(recipe.title.length>10?"…":""):"?"}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Day detail */}
-      {selectedDay&&(
-        <div className="detail-panel" style={{padding:20,marginBottom:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,flexWrap:"wrap",gap:8}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
-              {new Date(selectedDay+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
-              {selectedDay===today_key&&<span style={{marginLeft:8,fontSize:12,background:"var(--saffron)",color:"white",padding:"1px 8px",borderRadius:10,fontFamily:"'Lato',sans-serif",fontWeight:700}}>Today</span>}
-            </div>
-            {prefs.trackingEnabled&&dayTotalCals!=null&&(
-              <div style={{fontFamily:"'Special Elite',monospace",fontSize:16,color:prefs.dailyGoal&&dayTotalCals>prefs.dailyGoal?"var(--rust)":"var(--sage)"}}>
-                🔥 {dayTotalCals} cal
-              </div>
-            )}
+        {viewMode==="month"?(
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1);}}>‹</button>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>{MONTH_NAMES[viewMonth]} {viewYear}</div>
+            <button className="btn btn-ghost btn-sm" onClick={()=>{if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1);}}>›</button>
           </div>
-          {prefs.trackingEnabled&&<CalorieBar consumed={dayTotalCals||0} goal={prefs.dailyGoal}/>}
-          <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:16}}>
-            {MEAL_SLOTS.map(slot=>{
-              const entry=selectedDayData[slot];
-              const recipe=entry?recipes.find(r=>r.id===entry.id):null;
-              const mealCals=getMealCals(entry,recipe);
+        ):(
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <button className="btn btn-ghost btn-sm" onClick={prevWeek}>‹</button>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:16,fontWeight:700}}>
+              {new Date(weekDays[0]+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})} –{" "}
+              {new Date(weekDays[6]+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={nextWeek}>›</button>
+          </div>
+        )}
+        {!prefs.trackingEnabled&&(
+          <button className="btn btn-ghost btn-sm" onClick={()=>setPrefs(p=>({...p,trackingEnabled:true}))}>🔥 Calories</button>
+        )}
+        {prefs.trackingEnabled&&(
+          <button className="btn btn-ghost btn-sm" onClick={()=>setPrefs(p=>({...p,trackingEnabled:false}))}>Hide cal</button>
+        )}
+      </div>
+
+      {/* ── MONTH VIEW ── */}
+      {viewMode==="month"&&(
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+            {DAY_NAMES.map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:"var(--ink-light)",padding:"4px 0",textTransform:"uppercase"}}>{d}</div>)}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:16}}>
+            {Array(firstDay).fill(null).map((_,i)=><div key={"e"+i}/>)}
+            {Array(daysInMonth).fill(null).map((_,i)=>{
+              const day=i+1;
+              const dk=dateKey(viewYear,viewMonth,day);
+              const dayData=calData[dk]||{};
+              const meals=MEAL_SLOTS.filter(s=>dayData[s]);
+              const isToday=dk===today_key;
+              const isSelected=dk===selectedDay;
+              const dayCals=prefs.trackingEnabled?getDayTotalCals(dayData,recipes):null;
+              const overGoal=prefs.trackingEnabled&&prefs.dailyGoal&&dayCals>prefs.dailyGoal;
               return (
-                <div key={slot} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:6,
-                  background:"var(--parchment-dark)",border:`2px solid ${entry?SLOT_COLORS[slot]:"transparent"}`}}>
-                  <div style={{width:4,height:44,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:SLOT_COLORS[slot],marginBottom:2}}>{MEAL_LABELS[slot].split(" ")[1]}</div>
-                    {recipe?(
-                      <div>
-                        <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                          {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 5px",borderRadius:10,marginRight:5,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
-                          {recipe.title}
+                <div key={day} onClick={()=>setSelectedDay(isSelected?null:dk)}
+                  style={{border:isSelected?"2px solid var(--saffron)":isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
+                    borderRadius:6,padding:"6px 4px",minHeight:64,cursor:"pointer",
+                    background:isSelected?"rgba(212,137,26,0.08)":isToday?"var(--parchment-dark)":"var(--cream)",
+                    transition:"all 0.15s"}}>
+                  <div style={{fontFamily:"'Special Elite',monospace",fontSize:13,fontWeight:isToday?700:400,textAlign:"center",
+                    color:overGoal?"var(--rust)":isToday?"var(--ink)":"var(--ink-mid)",marginBottom:3}}>{day}</div>
+                  {dayCals!=null&&<div style={{textAlign:"center",fontSize:9,fontWeight:700,color:overGoal?"var(--rust)":"var(--sage)",marginBottom:2}}>{dayCals}</div>}
+                  <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                    {meals.map(slot=>{
+                      const entry=dayData[slot];
+                      const recipe=recipes.find(r=>r.id===entry.id);
+                      return (
+                        <div key={slot} style={{background:SLOT_COLORS[slot],borderRadius:3,padding:"1px 4px",
+                          fontSize:9,color:"white",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                          opacity:entry.leftover?0.65:1}}>
+                          {entry.leftover?"↩ ":""}{recipe?recipe.title.slice(0,10)+(recipe.title.length>10?"…":""):"?"}
                         </div>
-                        {prefs.trackingEnabled&&(
-                          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4,flexWrap:"wrap"}}>
-                            {mealCals!=null&&<span style={{fontSize:12,fontWeight:700,color:"var(--saffron)"}}>🔥 {mealCals} cal</span>}
-                            <div style={{display:"flex",alignItems:"center",gap:4}}>
-                              <span style={{fontSize:11,color:"var(--ink-light)"}}>Servings:</span>
-                              <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
-                                onClick={()=>updateServings(selectedDay,slot,Math.max(0.25,(entry.servings||1)-0.25))}>−</button>
-                              <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:"center"}}>{entry.servings||1}</span>
-                              <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
-                                onClick={()=>updateServings(selectedDay,slot,(entry.servings||1)+0.25)}>+</button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ):(
-                      <div style={{fontSize:13,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned</div>
-                    )}
-                  </div>
-                  <div style={{display:"flex",gap:6,flexShrink:0}}>
-                    <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:selectedDay,slot})}>
-                      {recipe?"Change":"+ Add"}
-                    </button>
-                    {recipe&&<button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>clearMeal(selectedDay,slot)}>✕</button>}
+                      );
+                    })}
                   </div>
                 </div>
               );
             })}
           </div>
+          {selectedDay&&<DayPanel dk={selectedDay}/>}
+          {!selectedDay&&<div style={{textAlign:"center",padding:"12px 0",color:"var(--ink-light)",fontSize:13}}>Tap a day to view or plan meals</div>}
+        </>
+      )}
+
+      {/* ── WEEK VIEW ── */}
+      {viewMode==="week"&&(
+        <div>
+          {/* Week header row */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:12}}>
+            {weekDays.map(dk=>{
+              const d=new Date(dk+"T12:00:00");
+              const isToday=dk===today_key;
+              const isSelected=dk===selectedDay;
+              const hasMeals=MEAL_SLOTS.some(s=>calData[dk]?.[s]);
+              return (
+                <div key={dk} onClick={()=>setSelectedDay(isSelected?null:dk)}
+                  style={{textAlign:"center",padding:"8px 4px",borderRadius:6,cursor:"pointer",
+                    background:isSelected?"rgba(212,137,26,0.08)":isToday?"var(--parchment-dark)":"var(--cream)",
+                    border:isSelected?"2px solid var(--saffron)":isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
+                    transition:"all 0.15s"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"var(--ink-light)",textTransform:"uppercase"}}>{DAY_NAMES[d.getDay()]}</div>
+                  <div style={{fontFamily:"'Special Elite',monospace",fontSize:16,fontWeight:isToday?700:400,color:isToday?"var(--ink)":"var(--ink-mid)"}}>{d.getDate()}</div>
+                  {hasMeals&&<div style={{display:"flex",justifyContent:"center",gap:2,marginTop:3}}>
+                    {MEAL_SLOTS.filter(s=>calData[dk]?.[s]).map(s=>(
+                      <div key={s} style={{width:6,height:6,borderRadius:"50%",background:SLOT_COLORS[s]}}/>
+                    ))}
+                  </div>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Selected day detail OR full week meal grid */}
+          {selectedDay&&weekDays.includes(selectedDay)?(
+            <DayPanel dk={selectedDay}/>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {weekDays.map(dk=>{
+                const d=new Date(dk+"T12:00:00");
+                const isToday=dk===today_key;
+                const meals=MEAL_SLOTS.filter(s=>calData[dk]?.[s]);
+                return (
+                  <div key={dk} style={{background:"var(--cream)",border:`1px solid ${isToday?"var(--ink)":"var(--parchment-dark)"}`,borderRadius:6,overflow:"hidden"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:isToday?"var(--parchment-dark)":"transparent",cursor:"pointer"}}
+                      onClick={()=>setSelectedDay(dk)}>
+                      <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,fontWeight:isToday?700:400}}>
+                        {d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}
+                        {isToday&&<span style={{marginLeft:6,fontSize:10,background:"var(--saffron)",color:"white",padding:"1px 6px",borderRadius:10}}>Today</span>}
+                      </div>
+                      <button className="btn btn-ghost btn-sm" style={{fontSize:11}} onClick={e=>{e.stopPropagation();setSelectedDay(dk);}}>Plan +</button>
+                    </div>
+                    {meals.length>0?(
+                      <div style={{padding:"6px 12px 10px",display:"flex",flexDirection:"column",gap:4}}>
+                        {meals.map(slot=>{
+                          const entry=calData[dk][slot];
+                          const recipe=recipes.find(r=>r.id===entry.id);
+                          const cals=getMealCals(entry,recipe);
+                          return (
+                            <div key={slot} style={{display:"flex",alignItems:"center",gap:8}}>
+                              <div style={{width:3,height:16,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
+                              <div style={{fontSize:11,fontWeight:700,color:SLOT_COLORS[slot],width:50,textTransform:"uppercase"}}>{slot}</div>
+                              <div style={{flex:1,fontSize:13,fontWeight:600,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
+                                {entry.leftover&&"↩ "}{recipe?.title||"?"}
+                              </div>
+                              {prefs.trackingEnabled&&cals&&<div style={{fontSize:11,color:"var(--saffron)",fontWeight:700,flexShrink:0}}>{cals} cal</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ):(
+                      <div style={{padding:"6px 12px 10px",fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned — tap to add</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
-      {!selectedDay&&<div style={{textAlign:"center",padding:"16px 0",color:"var(--ink-light)",fontSize:13}}>Tap a day to view or plan meals</div>}
 
       {assignModal&&(
         <AssignMealModal
@@ -3113,6 +3228,7 @@ function CalendarTab({ recipes }) {
     </div>
   );
 }
+
 
 function AssignMealModal({ dateKey, slot, recipes, currentId, trackingEnabled, onAssign, onClose }) {
   const [search,setSearch]=useState("");
