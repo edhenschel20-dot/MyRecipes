@@ -1,0 +1,20 @@
+{
+  "2026-06-02": {
+    "dinner": {
+      "id": "rkblcz0b",
+      "leftover": false
+    }
+  },
+  "2026-06-03": {
+    "lunch": {
+      "id": "rkblcz0b",
+      "leftover": true
+    }
+  },
+  "2026-06-04": {
+    "lunch": {
+      "id": "rkblcz0b",
+      "leftover": true
+    }
+  }
+}
