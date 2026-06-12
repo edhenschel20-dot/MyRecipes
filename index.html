@@ -437,10 +437,23 @@ async function githubRequest(token, repo, method, path, body) {
 
 async function githubGetFile(token, repo, path) {
   try {
-    const data = await githubRequest(token, repo, "GET", path);
-    return { content: JSON.parse(atob(data.content.replace(/\n/g,""))), sha: data.sha };
+    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+      }
+    });
+    if (res.status === 404) return { content: null, sha: null };
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`GitHub ${res.status}: ${txt.slice(0,100)}`);
+    }
+    const data = await res.json();
+    if (!data.content) return { content: null, sha: data.sha||null };
+    const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g,"")))));
+    return { content: decoded, sha: data.sha };
   } catch(e) {
-    if (e.message.includes("404") || e.message.includes("Not Found")) return { content: null, sha: null };
+    if (e.message && (e.message.includes("404") || e.message.includes("Not Found"))) return { content: null, sha: null };
     throw e;
   }
 }
@@ -451,7 +464,20 @@ async function githubPutFile(token, repo, path, content, sha, message) {
     content: btoa(unescape(encodeURIComponent(JSON.stringify(content, null, 2)))),
   };
   if (sha) body.sha = sha;
-  return githubRequest(token, repo, "PUT", path, body);
+  const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`GitHub ${res.status}: ${txt.slice(0,200)}`);
+  }
+  return res.json();
 }
 
 // High-level sync functions
