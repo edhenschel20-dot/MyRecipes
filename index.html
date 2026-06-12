@@ -606,13 +606,21 @@ function GitHubSettingsModal({ onClose, onSaved }) {
             <button className="btn btn-outline btn-sm" onClick={async()=>{
               setSyncing(true); setStatus("");
               try {
-                const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
-                const pantryData = JSON.parse(localStorage.getItem("recipebook_pantry_v1")||"[]");
-                const calData = JSON.parse(localStorage.getItem("recipebook_calendar_v1")||"{}");
+                // Read from localStorage safely
+                let recipeData = {}; 
+                let pantryData = [];
+                let calData = {};
+                try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
+                try { pantryData = JSON.parse(localStorage.getItem("recipebook_pantry_v1")||"[]"); } catch{}
+                try { calData = JSON.parse(localStorage.getItem("recipebook_calendar_v1")||"{}"); } catch{}
+                // Ensure arrays/objects are correct types
+                if (!Array.isArray(pantryData)) pantryData = [];
+                if (typeof calData !== "object" || Array.isArray(calData)) calData = {};
+                if (typeof recipeData !== "object" || Array.isArray(recipeData)) recipeData = {};
                 await syncToGitHub({token,repo}, recipeData, pantryData, calData);
-                setStatus("ok:✓ Synced! Check the data/ folder in your repo.");
+                setStatus("ok:✓ Synced successfully!");
               } catch(e) {
-                setStatus("err:Failed: " + (e.message||"unknown error") + " — check token has repo write permission");
+                setStatus("err:" + (e.message||"Unknown error"));
               }
               setSyncing(false);
             }} disabled={syncing}>
