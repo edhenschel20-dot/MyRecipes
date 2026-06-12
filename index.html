@@ -460,16 +460,16 @@ async function syncToGitHub(prefs, data, pantry, calendar) {
   if (!token || !repo) return;
   // Write files sequentially to avoid SHA conflicts
   try {
-    const rFile = await githubGetFile(token, repo, "data/recipes.json");
-    await githubPutFile(token, repo, "data/recipes.json", data, rFile.sha, "Update recipes");
+    const rFile = await githubGetFile(token, repo, "recipes.json");
+    await githubPutFile(token, repo, "recipes.json", data, rFile.sha, "Update recipes");
   } catch(e) { console.error("recipes sync failed:", e.message); throw e; }
   try {
-    const pFile = await githubGetFile(token, repo, "data/pantry.json");
-    await githubPutFile(token, repo, "data/pantry.json", pantry, pFile.sha, "Update pantry");
+    const pFile = await githubGetFile(token, repo, "pantry.json");
+    await githubPutFile(token, repo, "pantry.json", pantry, pFile.sha, "Update pantry");
   } catch(e) { console.error("pantry sync failed:", e.message); throw e; }
   try {
-    const cFile = await githubGetFile(token, repo, "data/calendar.json");
-    await githubPutFile(token, repo, "data/calendar.json", calendar, cFile.sha, "Update calendar");
+    const cFile = await githubGetFile(token, repo, "calendar.json");
+    await githubPutFile(token, repo, "calendar.json", calendar, cFile.sha, "Update calendar");
   } catch(e) { console.error("calendar sync failed:", e.message); throw e; }
   return true;
 }
@@ -479,9 +479,9 @@ async function loadFromGitHub(prefs) {
   if (!token || !repo) return null;
   try {
     const [rFile, pFile, cFile] = await Promise.all([
-      githubGetFile(token, repo, "data/recipes.json"),
-      githubGetFile(token, repo, "data/pantry.json"),
-      githubGetFile(token, repo, "data/calendar.json"),
+      githubGetFile(token, repo, "recipes.json"),
+      githubGetFile(token, repo, "pantry.json"),
+      githubGetFile(token, repo, "calendar.json"),
     ]);
     return {
       recipes: rFile.content,
@@ -586,7 +586,7 @@ function GitHubSettingsModal({ onClose, onSaved }) {
                 await syncToGitHub({token,repo}, recipeData, pantryData, calData);
                 setStatus("ok:✓ Synced! Check the data/ folder in your repo.");
               } catch(e) {
-                setStatus("err:Sync failed: " + e.message);
+                setStatus("err:Failed: " + (e.message||"unknown error") + " — check token has repo write permission");
               }
               setSyncing(false);
             }} disabled={syncing}>
@@ -745,7 +745,7 @@ function RecipeBook() {
       setSyncStatus("syncing");
       syncToGitHub(githubPrefs, data, pantry, calendar)
         .then(()=>{ setSyncStatus("ok"); setTimeout(()=>setSyncStatus(""), 2000); })
-        .catch(()=>{ setSyncStatus("error"); setTimeout(()=>setSyncStatus(""), 3000); });
+        .catch(e=>{ setSyncStatus("error:" + (e.message||"unknown")); setTimeout(()=>setSyncStatus(""), 8000); });
     }
   }, [data]);
 
@@ -842,7 +842,7 @@ function RecipeBook() {
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
             {syncStatus==="syncing"&&<span style={{fontSize:12,color:"var(--ink-light)"}}>⟳ Syncing…</span>}
             {syncStatus==="ok"&&<span style={{fontSize:12,color:"var(--sage)"}}>✓ Synced</span>}
-            {syncStatus==="error"&&<span style={{fontSize:12,color:"var(--rust)"}}>⚠ Sync failed</span>}
+            {syncStatus.startsWith("error")&&<span style={{fontSize:11,color:"var(--rust)",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={syncStatus.split(":").slice(1).join(":")}>⚠ {syncStatus.split(":").slice(1).join(":").slice(0,30)||"Sync failed"}</span>}
             <button className="btn-header" onClick={()=>setShowGitHubSettings(true)} title="GitHub Sync Settings">
               {githubPrefs.enabled?"☁️":"☁️"} Sync
             </button>
