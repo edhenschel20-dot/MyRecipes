@@ -736,6 +736,8 @@ function RecipeBook() {
   const [showGitHubSettings, setShowGitHubSettings] = useState(false);
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadGitHubPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
+  const [pantryVersion, setPantryVersion] = useState(0);
+  const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
     setLightbox({ src: photo, photos: photos||[photo], index: index||0 });
   }
@@ -754,10 +756,10 @@ function RecipeBook() {
           }
           if (ghData.pantry) {
             // Pantry is managed by PantryTab via its own localStorage — trigger a reload signal
-            if (Array.isArray(ghData.pantry)) localStorage.setItem(PANTRY_KEY, JSON.stringify(ghData.pantry));
+            if (Array.isArray(ghData.pantry)) { localStorage.setItem(PANTRY_KEY, JSON.stringify(ghData.pantry)); setPantryVersion(v=>v+1); }
           }
           if (ghData.calendar) {
-            if (typeof ghData.calendar === "object") localStorage.setItem(CAL_KEY, JSON.stringify(ghData.calendar));
+            if (typeof ghData.calendar === "object") { localStorage.setItem(CAL_KEY, JSON.stringify(ghData.calendar)); setCalVersion(v=>v+1); }
           }
         }
         setSyncStatus("ok");
@@ -905,8 +907,8 @@ function RecipeBook() {
           }
           upsertRecipe(r); setEditRecipe(r); setTab("library");
         }} />}
-        {tab==="pantry" && <PantryTab recipes={recipes} />}
-        {tab==="calendar" && <CalendarTab recipes={recipes} />}
+        {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
+        {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{
           // Only check duplicates for new recipes, not edits
@@ -2580,8 +2582,9 @@ function savePantry(items) {
 }
 function pantryUid() { return "p"+Math.random().toString(36).slice(2,9); }
 
-function PantryTab({ recipes }) {
+function PantryTab({ recipes, version }) {
   const [items, setItems] = useState(()=>loadPantry());
+  useEffect(()=>{ if(version>0) setItems(loadPantry()); },[version]);
   const [view, setView] = useState("pantry"); // pantry | shopping
   const [filterCat, setFilterCat] = useState("");
   const [search, setSearch] = useState("");
@@ -2868,8 +2871,9 @@ function CalorieBar({ consumed, goal }) {
   );
 }
 
-function CalendarTab({ recipes }) {
+function CalendarTab({ recipes, version }) {
   const [calData, setCalData] = useState(()=>loadCalendar());
+  useEffect(()=>{ if(version>0) setCalData(loadCalendar()); },[version]);
   const [prefs, setPrefs] = useState(()=>loadCalPrefs());
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
