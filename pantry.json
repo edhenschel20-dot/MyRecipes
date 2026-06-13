@@ -38,5 +38,461 @@
     "quantity": "",
     "notes": "Homemade",
     "status": "have"
+  },
+  {
+    "id": "gkls4pmz",
+    "name": "Shredded Queso Quesadilla Cheese",
+    "category": "Dairy",
+    "quantity": "2 lb",
+    "notes": "Lucerne",
+    "status": "have"
+  },
+  {
+    "id": "38mlkjv9",
+    "name": "Provolone Cheese Slices (Smoke Flavored)",
+    "category": "Dairy",
+    "quantity": "2 packs",
+    "notes": "Lucerne",
+    "status": "have"
+  },
+  {
+    "id": "rjkikank",
+    "name": "Mozzarella Cheese Slices",
+    "category": "Dairy",
+    "quantity": "",
+    "notes": "Meijer",
+    "status": "have"
+  },
+  {
+    "id": "aejphrvq",
+    "name": "Parmesan Romano Asiago Shaved Blend",
+    "category": "Dairy",
+    "quantity": "6 oz",
+    "notes": "Lucerne 3-Cheese",
+    "status": "have"
+  },
+  {
+    "id": "57m1uocz",
+    "name": "Pepper Jack Cheese Slices",
+    "category": "Dairy",
+    "quantity": "",
+    "notes": "Lucerne",
+    "status": "have"
+  },
+  {
+    "id": "ilgzozmx",
+    "name": "Shredded Mozzarella",
+    "category": "Dairy",
+    "quantity": "",
+    "notes": "Meijer",
+    "status": "have"
+  },
+  {
+    "id": "b4yycfg4",
+    "name": "Cheddar Jack Finely Shredded",
+    "category": "Dairy",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "31b057gd",
+    "name": "Shredded Parmesan",
+    "category": "Dairy",
+    "quantity": "5-6 oz",
+    "notes": "Sargento (2 bags)",
+    "status": "have"
+  },
+  {
+    "id": "emiyvm2m",
+    "name": "Sargento Balanced Breaks",
+    "category": "Dairy",
+    "quantity": "",
+    "notes": "Cheese & Ritz Crackers",
+    "status": "have"
+  },
+  {
+    "id": "hngbp15c",
+    "name": "Country Crock Calcium Spread",
+    "category": "Dairy",
+    "quantity": "15 oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "w2e8p90t",
+    "name": "Greek Yogurt Plain Traditional",
+    "category": "Dairy",
+    "quantity": "24 oz",
+    "notes": "The Greek Gods",
+    "status": "have"
+  },
+  {
+    "id": "z31co40i",
+    "name": "Fairlife Fat Free Ultra-Filtered Milk",
+    "category": "Dairy",
+    "quantity": "52 fl oz x2",
+    "notes": "Lactose free",
+    "status": "have"
+  },
+  {
+    "id": "i5lztdjk",
+    "name": "Whole Milk",
+    "category": "Dairy",
+    "quantity": "1/2 gallon",
+    "notes": "Meijer",
+    "status": "have"
+  },
+  {
+    "id": "4rjp6dj7",
+    "name": "Starbucks Caramel Macchiato Zero Creamer",
+    "category": "Dairy",
+    "quantity": "",
+    "notes": "0g added sugar",
+    "status": "have"
+  },
+  {
+    "id": "imttcom6",
+    "name": "Eggs",
+    "category": "Dairy",
+    "quantity": "~13",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "xdom02fw",
+    "name": "Jimmy Dean Pork Sausage Links",
+    "category": "Meat & Seafood",
+    "quantity": "12 count",
+    "notes": "Original, fully cooked",
+    "status": "have"
+  },
+  {
+    "id": "m5o84pcv",
+    "name": "Eckrich Hard Salami",
+    "category": "Meat & Seafood",
+    "quantity": "",
+    "notes": "Pre-sliced deli",
+    "status": "have"
+  },
+  {
+    "id": "w63w06xw",
+    "name": "Hardwood Smoked Bacon",
+    "category": "Meat & Seafood",
+    "quantity": "16 oz",
+    "notes": "Meijer",
+    "status": "have"
+  },
+  {
+    "id": "ri3zjm2a",
+    "name": "Hot Dogs",
+    "category": "Meat & Seafood",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "5zbqa1aj",
+    "name": "Beef Rib Shaved Steak",
+    "category": "Meat & Seafood",
+    "quantity": "14 oz",
+    "notes": "Bertolino Certified Angus Beef",
+    "status": "have"
+  },
+  {
+    "id": "a55h41f6",
+    "name": "Deli Ham",
+    "category": "Meat & Seafood",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "z9vspxkb",
+    "name": "Lemons",
+    "category": "Produce",
+    "quantity": "~9",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "m5o5807c",
+    "name": "Blackberries",
+    "category": "Produce",
+    "quantity": "1 pint",
+    "notes": "Driscoll's",
+    "status": "have"
+  },
+  {
+    "id": "56sjuooe",
+    "name": "Blueberries",
+    "category": "Produce",
+    "quantity": "1 pint",
+    "notes": "Naturipe",
+    "status": "have"
+  },
+  {
+    "id": "32ix76ob",
+    "name": "Carrot Chips",
+    "category": "Produce",
+    "quantity": "",
+    "notes": "O Organics",
+    "status": "have"
+  },
+  {
+    "id": "rab7v3r4",
+    "name": "Claussen Kosher Dill Halves",
+    "category": "Condiments",
+    "quantity": "2 jars",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "f4ql9r5m",
+    "name": "Hot Cherry Salsa",
+    "category": "Condiments",
+    "quantity": "16 oz",
+    "notes": "Cherry Republic",
+    "status": "have"
+  },
+  {
+    "id": "97rj3io4",
+    "name": "Whole Sweet Gherkins",
+    "category": "Condiments",
+    "quantity": "",
+    "notes": "Kroger",
+    "status": "have"
+  },
+  {
+    "id": "mfyds5gy",
+    "name": "Pepperoncini",
+    "category": "Condiments",
+    "quantity": "12 oz",
+    "notes": "Mt. Olive",
+    "status": "have"
+  },
+  {
+    "id": "po3dc20m",
+    "name": "Roasted Bell Peppers",
+    "category": "Condiments",
+    "quantity": "16 fl oz",
+    "notes": "Mezzetta mild",
+    "status": "have"
+  },
+  {
+    "id": "gfrwf90u",
+    "name": "Soy Sauce",
+    "category": "Condiments",
+    "quantity": "15 fl oz",
+    "notes": "Kikkoman",
+    "status": "have"
+  },
+  {
+    "id": "g5rn13iz",
+    "name": "Worcestershire Sauce",
+    "category": "Condiments",
+    "quantity": "",
+    "notes": "Great Value",
+    "status": "have"
+  },
+  {
+    "id": "rd56wq1a",
+    "name": "Ranch Dressing & Dip (Light)",
+    "category": "Condiments",
+    "quantity": "16 fl oz",
+    "notes": "Meijer",
+    "status": "have"
+  },
+  {
+    "id": "622pq8fe",
+    "name": "Mayonnaise",
+    "category": "Condiments",
+    "quantity": "19 fl oz",
+    "notes": "Hellmann's Real",
+    "status": "have"
+  },
+  {
+    "id": "2kuomoqd",
+    "name": "Dill Pickle Bites (Oh Snap!)",
+    "category": "Condiments",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "dxsi7g01",
+    "name": "Perfect Bar Dark Chocolate Peanut Butter",
+    "category": "Other",
+    "quantity": "2",
+    "notes": "Refrigerated protein bar",
+    "status": "have"
+  },
+  {
+    "id": "gqd1ue03",
+    "name": "Pillsbury Cinnamon Rolls with Icing",
+    "category": "Baking",
+    "quantity": "2 cans (8 rolls each)",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "jb4e8isv",
+    "name": "Tombstone Original Crust Pizza",
+    "category": "Frozen",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "idcrjo2i",
+    "name": "Steak Cut Fries",
+    "category": "Frozen",
+    "quantity": "",
+    "notes": "Signature Select",
+    "status": "have"
+  },
+  {
+    "id": "u2z4l6ci",
+    "name": "Crispy Breaded Green Beans",
+    "category": "Frozen",
+    "quantity": "",
+    "notes": "Birds Eye",
+    "status": "have"
+  },
+  {
+    "id": "pgnnl9x6",
+    "name": "Shredded Hash Browns",
+    "category": "Frozen",
+    "quantity": "30 oz",
+    "notes": "Meijer",
+    "status": "have"
+  },
+  {
+    "id": "cuf5yedh",
+    "name": "Mozzarella Cheese Stuffed Breadsticks",
+    "category": "Frozen",
+    "quantity": "2 boxes",
+    "notes": "Signature Select",
+    "status": "have"
+  },
+  {
+    "id": "lsw9gjhl",
+    "name": "White Bread",
+    "category": "Frozen",
+    "quantity": "",
+    "notes": "Jewel (in freezer)",
+    "status": "have"
+  },
+  {
+    "id": "cp67764z",
+    "name": "Freeze Pops / Popsicles",
+    "category": "Frozen",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "esz1y4t4",
+    "name": "Orange Juice (Pulp Free)",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "Minute Maid",
+    "status": "have"
+  },
+  {
+    "id": "98is3rv4",
+    "name": "Zero Sugar Lemon Lime Soda",
+    "category": "Beverages",
+    "quantity": "2L",
+    "notes": "Signature Select",
+    "status": "have"
+  },
+  {
+    "id": "vczx0juy",
+    "name": "Diet Cola",
+    "category": "Beverages",
+    "quantity": "2L",
+    "notes": "Signature Select",
+    "status": "have"
+  },
+  {
+    "id": "j8vntjhx",
+    "name": "Red Wine (Autumn Black)",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "Salt of the Earth",
+    "status": "have"
+  },
+  {
+    "id": "t3d8p6bu",
+    "name": "Red Wine (The One)",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "6u6oftxh",
+    "name": "Mango White Wine",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "Il Conte",
+    "status": "have"
+  },
+  {
+    "id": "uw0u4934",
+    "name": "Capri Sun Strawberry",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "e9idog6r",
+    "name": "Honest Kids Apple Juice Boxes",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "1aguj3e4",
+    "name": "Hawaiian Punch",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "r4cvuh2d",
+    "name": "Premier Protein Caf\u00e9 Latte",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "30g protein",
+    "status": "have"
+  },
+  {
+    "id": "k8izl49s",
+    "name": "Vanilla Ultra-Filtered Milk Shake",
+    "category": "Beverages",
+    "quantity": "11.5 fl oz",
+    "notes": "Member's Mark",
+    "status": "have"
+  },
+  {
+    "id": "282gz9u1",
+    "name": "Minute Maid Lemonade",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "6j3fr6o6",
+    "name": "All-Purpose Flour",
+    "category": "Baking",
+    "quantity": "",
+    "notes": "Vacuum sealed, dated 5/24/26",
+    "status": "have"
   }
 ]
