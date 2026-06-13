@@ -1032,11 +1032,307 @@
     "status": "have"
   },
   {
-    "id": "3qzu6zcb",
-    "name": "Ground Cloves",
+    "id": "aj3vhm51",
+    "name": "Ground Cinnamon",
     "category": "Spices & Herbs",
-    "quantity": "3 oz",
-    "notes": "",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "9eghzd5h",
+    "name": "Celery Salt",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "gwqcmvzy",
+    "name": "Dill Weed",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "ad4xnpgo",
+    "name": "Cumin",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "zazabn2r",
+    "name": "Ghost Pepper",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "0k3xb8p8",
+    "name": "Minced Garlic",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "xms3xb3e",
+    "name": "Ground Ginger",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "3iendf9m",
+    "name": "Garlic Powder",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "j9m4jrs7",
+    "name": "Sesame Seeds",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "jhhtotc1",
+    "name": "Ground Sage",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "rh3ea51x",
+    "name": "Tarragon",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "w19tgasc",
+    "name": "Turmeric",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "ik2v6gnf",
+    "name": "Ground Thyme",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "38ym0isz",
+    "name": "White Pepper",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "nbygx280",
+    "name": "Ground Marjoram",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "2maezyjc",
+    "name": "Ground Mustard",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "l3yjb5xu",
+    "name": "Oregano",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "furfhs6k",
+    "name": "Dried Mint",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "mwz97bgj",
+    "name": "Mexican Oregano",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "awzvtjg3",
+    "name": "Oregano (Ground)",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "nbkr1rqi",
+    "name": "Onion Powder",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "sqnt09ug",
+    "name": "Nutmeg",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "1wo3478f",
+    "name": "Ground Allspice",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "s4oq26i2",
+    "name": "Allspice (Whole)",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "i3t7hk72",
+    "name": "Blackened Seasoning",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "hah48e8j",
+    "name": "Basil",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "h0niaal8",
+    "name": "Celery Seed",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "myes0hsc",
+    "name": "Bay Leaves",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "7zyqdsd5",
+    "name": "Ground Chipotle",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "er4gwtju",
+    "name": "Chili Powder",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "48f86amo",
+    "name": "Smoked Paprika",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "4a8g7kd5",
+    "name": "Onion Flakes",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "pg44el9a",
+    "name": "Poppy Seed",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "hdurzk38",
+    "name": "Parsley",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "7ehraidu",
+    "name": "Red Pepper Flakes",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "p1boq2au",
+    "name": "Pumpkin Pie Spice",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "65yvjb3n",
+    "name": "Ground Rosemary",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
+    "status": "have"
+  },
+  {
+    "id": "ueet2k8v",
+    "name": "Rosemary",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "Spice rack",
     "status": "have"
   }
 ]
