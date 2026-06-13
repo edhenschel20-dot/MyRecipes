@@ -1,7 +1,7 @@
 [
   {
     "id": "pbl1q4jq",
-    "name": "Panko",
+    "name": "Panko Breadcrumbs",
     "category": "Other",
     "quantity": "",
     "notes": "",
@@ -32,119 +32,119 @@
     "status": "have"
   },
   {
-    "id": "z7thhx3k",
-    "name": "Ed's Nashville Hot Seasoning",
+    "id": "gq5z8se1",
+    "name": "Nashville Hot Seasoning",
     "category": "Spices & Herbs",
     "quantity": "",
     "notes": "Homemade",
     "status": "have"
   },
   {
-    "id": "hqqw26ky",
-    "name": "Ground Black Pepper (Organic)",
+    "id": "n8f5ughj",
+    "name": "Ground Black Pepper",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "Member's Mark",
+    "notes": "Organic",
     "status": "have"
   },
   {
-    "id": "3jukf9el",
+    "id": "02yz0h3h",
     "name": "Chipotle & Himalayan Pink Salt Seasoning",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "Dean Jacob's grinder",
+    "notes": "Adjustable grinder",
     "status": "have"
   },
   {
-    "id": "8bgxvybf",
-    "name": "Kosher Salt (Coarse)",
+    "id": "nzbvkw36",
+    "name": "Kosher Salt",
     "category": "Spices & Herbs",
     "quantity": "1 lb",
-    "notes": "Morton",
+    "notes": "Coarse",
     "status": "have"
   },
   {
-    "id": "lhuxwos0",
+    "id": "bzkaz9q1",
     "name": "Himalayan Pink Salt (Fine)",
     "category": "Spices & Herbs",
     "quantity": "17.6 oz",
-    "notes": "Morton",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "8bvhlay3",
-    "name": "Himalayan Pink Salt (Large)",
+    "id": "za2mehov",
+    "name": "Himalayan Pink Salt",
     "category": "Spices & Herbs",
     "quantity": "2.37 lb",
-    "notes": "Member's Mark",
+    "notes": "Large container",
     "status": "have"
   },
   {
-    "id": "z1brpy7r",
+    "id": "y1ywgovm",
     "name": "Apple Smoked Sea Salt",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "San Francisco Salt Co.",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "vsoezwgv",
-    "name": "Hottest Hot Salt",
+    "id": "o8vjzknh",
+    "name": "Hot Salt",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "Salty Provisions",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "gnxlm0ig",
+    "id": "zxjlh0b0",
     "name": "Sea Salt (Coarse)",
     "category": "Spices & Herbs",
     "quantity": "17.6 oz",
-    "notes": "Morton",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "y259qu14",
+    "id": "pjd0r5pp",
     "name": "Himalayan Pink Salt Grinder Refill",
     "category": "Spices & Herbs",
     "quantity": "12.5 oz",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "pp1k33gu",
+    "id": "sax76sry",
     "name": "Whole Black Pepper",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "Signature grinder",
+    "notes": "Grinder",
     "status": "have"
   },
   {
-    "id": "e95fj9nv",
-    "name": "Imported Paprika",
+    "id": "p4l8bh5n",
+    "name": "Paprika (Imported)",
     "category": "Spices & Herbs",
     "quantity": "4 oz",
-    "notes": "Marconi",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "mpn212gv",
-    "name": "Sweet & Smoky Grill Mates Rub",
+    "id": "06mcmt8d",
+    "name": "Sweet & Smoky Rub",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "McCormick",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "a5m5azva",
-    "name": "Pure Vanilla Extract",
+    "id": "oog5usjf",
+    "name": "Vanilla Extract",
     "category": "Spices & Herbs",
     "quantity": "4 fl oz",
-    "notes": "McCormick",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "0j45m974",
+    "id": "0xrhwqkp",
     "name": "Tajin",
     "category": "Spices & Herbs",
     "quantity": "",
@@ -152,23 +152,23 @@
     "status": "have"
   },
   {
-    "id": "dspvx0sh",
+    "id": "lkxvwic4",
     "name": "Garlic Salt",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "Lawry's coarse ground with parsley",
+    "notes": "Coarse ground with parsley",
     "status": "have"
   },
   {
-    "id": "njv168w3",
+    "id": "am1slzbr",
     "name": "Hot Honey Chipotle Rub",
     "category": "Spices & Herbs",
     "quantity": "5.9 oz",
-    "notes": "Pit Boss",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "fyvr3bbg",
+    "id": "r02fwxfa",
     "name": "Dried Habanero Flakes",
     "category": "Spices & Herbs",
     "quantity": "",
@@ -176,359 +176,431 @@
     "status": "have"
   },
   {
-    "id": "e7p176vv",
+    "id": "f25wghwr",
     "name": "Paprika",
     "category": "Spices & Herbs",
     "quantity": "6.62 oz",
-    "notes": "McCormick large",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "jvv1c7xh",
+    "id": "mguze5by",
     "name": "Italian Seasoning",
     "category": "Spices & Herbs",
     "quantity": "",
-    "notes": "McCormick Perfect Pinch",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "c3dpwhoe",
-    "name": "Red Robin Original Seasoning",
+    "id": "l791tni1",
+    "name": "Original Seasoning Blend",
     "category": "Spices & Herbs",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "j78khkbc",
+    "id": "ep26j8gj",
     "name": "Cayenne Pepper",
     "category": "Spices & Herbs",
     "quantity": "1 lb",
-    "notes": "Member's Mark",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "ca7qemap",
+    "id": "pe7iqitp",
     "name": "Chicken Sandwich Cayenne Spice",
     "category": "Spices & Herbs",
     "quantity": "1 lb",
-    "notes": "Member's Mark",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "tifaatje",
+    "id": "fu8q9ub8",
     "name": "Farm Dust Seasoning",
     "category": "Spices & Herbs",
     "quantity": "8 oz",
-    "notes": "Weaver's Dutch Country",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "g1p9zzwg",
-    "name": "Kinder's Whiskey Peppercorn Seasoning",
-    "category": "Spices & Herbs",
-    "quantity": "",
-    "notes": "Steakhouse Collection",
-    "status": "have"
-  },
-  {
-    "id": "oiftjbig",
-    "name": "Kinder's Black Cherry Chipotle Rub",
+    "id": "nmnt86qe",
+    "name": "Whiskey Peppercorn Seasoning",
     "category": "Spices & Herbs",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "x1d2r4fv",
-    "name": "Kinder's Cajun Seasoning",
-    "category": "Spices & Herbs",
-    "quantity": "",
-    "notes": "with Garlic & Cayenne",
-    "status": "have"
-  },
-  {
-    "id": "ecv4e5gj",
-    "name": "Meat Church Holy Voodoo",
+    "id": "np4cm2gb",
+    "name": "Black Cherry Chipotle Rub",
     "category": "Spices & Herbs",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "s7ms26ik",
-    "name": "Blackstone Cajun Seasoning",
+    "id": "kfrzyoe4",
+    "name": "Cajun Seasoning (Garlic & Cayenne)",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "z6ggyom4",
+    "name": "Holy Voodoo Seasoning",
+    "category": "Spices & Herbs",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "kk2naaun",
+    "name": "Cajun Seasoning",
     "category": "Spices & Herbs",
     "quantity": "8.3 oz",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "udxqs0ph",
-    "name": "Blackstone Essential Blend",
+    "id": "3bsvk627",
+    "name": "Essential Blend All Purpose Seasoning",
     "category": "Spices & Herbs",
     "quantity": "7.5 oz",
-    "notes": "All Purpose",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "g24nlajl",
-    "name": "Weber N'Orleans Cajun Seasoning",
+    "id": "f1f6ee12",
+    "name": "N'Orleans Cajun Seasoning",
     "category": "Spices & Herbs",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "s38sllk9",
-    "name": "Blackstone Steakhouse Seasoning",
+    "id": "o172af2a",
+    "name": "Steakhouse Seasoning",
     "category": "Spices & Herbs",
     "quantity": "7.3 oz",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "j2xj8fou",
-    "name": "Sweet Peppers (Dried)",
+    "id": "paijl87p",
+    "name": "Dried Sweet Peppers",
     "category": "Spices & Herbs",
     "quantity": "",
     "notes": "Homemade, zip bag",
     "status": "have"
   },
   {
-    "id": "tbzkrcdm",
+    "id": "2q8k9dk1",
     "name": "Avocado Oil",
     "category": "Oils & Vinegars",
     "quantity": "16.9 fl oz",
-    "notes": "Better Body Foods",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "66uveztp",
-    "name": "Cooking Olive Oil",
+    "id": "o0pjcyd8",
+    "name": "Olive Oil (Cooking)",
     "category": "Oils & Vinegars",
     "quantity": "",
-    "notes": "Bertolli",
+    "notes": "High temp",
     "status": "have"
   },
   {
-    "id": "6ahotl51",
+    "id": "1913i09w",
     "name": "Extra Virgin Olive Oil",
     "category": "Oils & Vinegars",
     "quantity": "10 fl oz",
-    "notes": "Signature Select",
+    "notes": "Small bottle",
     "status": "have"
   },
   {
-    "id": "72rhdnon",
+    "id": "sdgigupj",
     "name": "Vegetable Oil",
     "category": "Oils & Vinegars",
     "quantity": "1 gallon",
-    "notes": "Signature Select",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "2snncft9",
+    "id": "pii4wnwx",
     "name": "Canola Oil",
     "category": "Oils & Vinegars",
     "quantity": "48 fl oz",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "xhczrqn7",
-    "name": "Bread Dipping Extra Virgin Olive Oil",
+    "id": "k5azluna",
+    "name": "Bread Dipping Olive Oil",
     "category": "Oils & Vinegars",
     "quantity": "17 oz",
-    "notes": "First cold pressed, garlic & basil",
+    "notes": "Garlic & basil, first cold pressed",
     "status": "have"
   },
   {
-    "id": "ltrkq56h",
+    "id": "lxw269k3",
     "name": "Chili Pepper Infused Olive Oil",
     "category": "Oils & Vinegars",
     "quantity": "",
-    "notes": "Frederik's by Meijer",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "2k28yowb",
-    "name": "Tuscan Herbs EVOO",
+    "id": "5lk2k2fs",
+    "name": "Tuscan Herbs Olive Oil",
     "category": "Oils & Vinegars",
     "quantity": "",
-    "notes": "Grand'Aroma / Mantova",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "jd998q7a",
-    "name": "Balsamic Glaze (Organic)",
+    "id": "pafgrlbr",
+    "name": "Balsamic Glaze",
     "category": "Oils & Vinegars",
     "quantity": "8.5 fl oz",
-    "notes": "Fini",
+    "notes": "Organic",
     "status": "have"
   },
   {
-    "id": "0sa02m1g",
+    "id": "ktfkoqv2",
     "name": "Balsamic Glaze of Modena",
     "category": "Oils & Vinegars",
     "quantity": "8.5 fl oz",
-    "notes": "Good & Gather",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "jafecg9m",
-    "name": "Michigan Cherry Balsamic Vinegar",
+    "id": "z1dj5ygj",
+    "name": "Cherry Balsamic Vinegar",
     "category": "Oils & Vinegars",
     "quantity": "12 fl oz",
-    "notes": "Cherry Republic",
+    "notes": "Michigan",
     "status": "have"
   },
   {
-    "id": "uy0zn70v",
-    "name": "Distilled White Vinegar",
+    "id": "fe462ali",
+    "name": "White Vinegar",
     "category": "Oils & Vinegars",
     "quantity": "",
-    "notes": "Best Choice 5% acidity",
+    "notes": "5% acidity",
     "status": "have"
   },
   {
-    "id": "aktbxw70",
+    "id": "v7jy9abc",
     "name": "Red Wine Vinegar",
     "category": "Oils & Vinegars",
     "quantity": "12.7 fl oz",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "9cwz43vu",
+    "id": "r18py0ee",
     "name": "White Wine Vinegar",
     "category": "Oils & Vinegars",
     "quantity": "12.7 fl oz",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "275045e1",
+    "id": "vw8yta6h",
     "name": "Cherry Chianti Balsamic Glaze",
     "category": "Oils & Vinegars",
     "quantity": "8.4 fl oz",
-    "notes": "Olive Cart",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "h135vjwx",
-    "name": "Balsamic Vinegar (Sweet & Tangy)",
+    "id": "z837fvmx",
+    "name": "Balsamic Vinegar",
     "category": "Oils & Vinegars",
     "quantity": "16 fl oz",
-    "notes": "Pompeian Gourmet",
+    "notes": "Sweet & tangy",
     "status": "have"
   },
   {
-    "id": "ox68m28t",
-    "name": "Dark Balsamic (Cherry Orchards)",
+    "id": "yxuj72ko",
+    "name": "Dark Balsamic Vinegar",
     "category": "Oils & Vinegars",
     "quantity": "8.45 fl oz",
-    "notes": "Olive Cart",
+    "notes": "Cherry orchards",
     "status": "have"
   },
   {
-    "id": "ep2wap6z",
+    "id": "5nnvq109",
     "name": "Balsamic Vinegar of Modena",
     "category": "Oils & Vinegars",
     "quantity": "8.45 fl oz",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "hwo34k4m",
+    "id": "4m52qb2g",
     "name": "Liquid Smoke (Hickory)",
     "category": "Condiments",
-    "quantity": "",
-    "notes": "Colgin",
+    "quantity": "2 bottles",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "bzsliwy7",
-    "name": "Liquid Smoke (Hickory)",
-    "category": "Condiments",
-    "quantity": "",
-    "notes": "Wright's",
-    "status": "have"
-  },
-  {
-    "id": "b86md017",
+    "id": "7ybq7yqu",
     "name": "Spicy Brown Mustard",
     "category": "Condiments",
     "quantity": "12 oz",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "iasbkiu9",
+    "id": "riwv455p",
     "name": "Hot Honey Dijon Mustard",
     "category": "Condiments",
     "quantity": "9.4 oz",
-    "notes": "Maille with Mike's Hot Honey",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "rr6dhyah",
+    "id": "ypj0eqzm",
     "name": "Caramel Sauce",
     "category": "Condiments",
     "quantity": "16 oz",
-    "notes": "Ghirardelli",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "6nfog5uw",
+    "id": "y0mbrptg",
     "name": "Dijon Mustard",
     "category": "Condiments",
     "quantity": "10 oz",
-    "notes": "Grey Poupon",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "kbim75i1",
+    "id": "etgarsqk",
     "name": "Yellow Mustard",
     "category": "Condiments",
     "quantity": "",
-    "notes": "French's",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "yczqoa6k",
-    "name": "Tomato Ketchup",
+    "id": "h3ac2nxn",
+    "name": "Ketchup",
     "category": "Condiments",
     "quantity": "32 oz",
-    "notes": "Signature Select",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "3zbhitub",
-    "name": "Honey Mustard Dipping Sauce",
+    "id": "pq9alz7v",
+    "name": "Honey Mustard",
     "category": "Condiments",
     "quantity": "14 fl oz",
-    "notes": "Sweet Baby Ray's",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "6vm16po8",
+    "id": "cowobavm",
+    "name": "Kosher Dill Pickles (Halves)",
+    "category": "Condiments",
+    "quantity": "2 jars",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "7urwjy2f",
+    "name": "Hot Cherry Salsa",
+    "category": "Condiments",
+    "quantity": "16 oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "8pldb6du",
+    "name": "Sweet Gherkins",
+    "category": "Condiments",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "rz9j079c",
+    "name": "Pepperoncini",
+    "category": "Condiments",
+    "quantity": "12 oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "jjfz5dk6",
+    "name": "Roasted Bell Peppers",
+    "category": "Condiments",
+    "quantity": "16 fl oz",
+    "notes": "Mild",
+    "status": "have"
+  },
+  {
+    "id": "1cjin8fl",
+    "name": "Soy Sauce",
+    "category": "Condiments",
+    "quantity": "15 fl oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "vlpiy7l5",
+    "name": "Worcestershire Sauce",
+    "category": "Condiments",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "787ictyd",
+    "name": "Ranch Dressing (Light)",
+    "category": "Condiments",
+    "quantity": "16 fl oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "9e26dp1b",
+    "name": "Mayonnaise",
+    "category": "Condiments",
+    "quantity": "19 fl oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "jnjz7v3y",
+    "name": "Dill Pickle Bites",
+    "category": "Condiments",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "u0y8ak11",
     "name": "Salted Butter",
     "category": "Dairy",
     "quantity": "1 lb",
-    "notes": "Great Value",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "zhftnbc6",
-    "name": "Challenge Salted Butter",
+    "id": "tcyzjxdk",
+    "name": "Salted Butter (Sticks)",
     "category": "Dairy",
     "quantity": "2 sticks",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "okhfiyiq",
+    "id": "b8eqthel",
     "name": "String Cheese",
     "category": "Dairy",
     "quantity": "",
@@ -536,167 +608,135 @@
     "status": "have"
   },
   {
-    "id": "zwb0096o",
+    "id": "f43jh6tg",
     "name": "Cream Cheese",
     "category": "Dairy",
     "quantity": "8 oz",
-    "notes": "Meijer Original",
+    "notes": "Block",
     "status": "have"
   },
   {
-    "id": "2dcxhggc",
-    "name": "Philadelphia Cream Cheese",
+    "id": "gmlxoyxx",
+    "name": "Cream Cheese (Tub)",
     "category": "Dairy",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "s0zd02ns",
-    "name": "Flour Tortillas",
-    "category": "Grains & Pasta",
-    "quantity": "",
-    "notes": "Mission Super Soft",
-    "status": "have"
-  },
-  {
-    "id": "tvts8jhf",
-    "name": "Light Corn Syrup",
-    "category": "Baking",
-    "quantity": "",
-    "notes": "Meijer",
-    "status": "have"
-  },
-  {
-    "id": "fy6hybvu",
-    "name": "Almond Extract",
-    "category": "Baking",
-    "quantity": "",
-    "notes": "Meijer",
-    "status": "have"
-  },
-  {
-    "id": "lvfquqay",
-    "name": "Pure Lemon Extract (Organic)",
-    "category": "Baking",
-    "quantity": "2 fl oz",
-    "notes": "Watkins",
-    "status": "have"
-  },
-  {
-    "id": "3054jxqj",
-    "name": "Shredded Queso Quesadilla Cheese",
+    "id": "ky93zbd3",
+    "name": "Shredded Quesadilla Cheese",
     "category": "Dairy",
     "quantity": "2 lb",
-    "notes": "Lucerne",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "r892znyx",
-    "name": "Provolone Cheese Slices (Smoke Flavored)",
+    "id": "s7smki71",
+    "name": "Provolone Slices (Smoked)",
     "category": "Dairy",
     "quantity": "2 packs",
-    "notes": "Lucerne",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "0j07ie0f",
-    "name": "Mozzarella Cheese Slices",
+    "id": "m89sambo",
+    "name": "Mozzarella Slices",
     "category": "Dairy",
     "quantity": "",
-    "notes": "Meijer",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "pf7i9k1t",
-    "name": "Parmesan Romano Asiago Shaved Blend",
+    "id": "ijbq2yxb",
+    "name": "Parmesan Romano Asiago Blend (Shaved)",
     "category": "Dairy",
     "quantity": "6 oz",
-    "notes": "Lucerne 3-Cheese",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "6r3usquw",
-    "name": "Pepper Jack Cheese Slices",
+    "id": "ddts0ez8",
+    "name": "Pepper Jack Slices",
     "category": "Dairy",
     "quantity": "",
-    "notes": "Lucerne",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "wp08z3aa",
+    "id": "p7qeyyx5",
     "name": "Shredded Mozzarella",
     "category": "Dairy",
     "quantity": "",
-    "notes": "Meijer",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "ne7lroh5",
-    "name": "Cheddar Jack Finely Shredded",
+    "id": "a48sp4kd",
+    "name": "Shredded Cheddar Jack",
     "category": "Dairy",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "4it92lz2",
+    "id": "i7ib2bge",
     "name": "Shredded Parmesan",
     "category": "Dairy",
     "quantity": "5-6 oz",
-    "notes": "Sargento (2 bags)",
+    "notes": "2 bags",
     "status": "have"
   },
   {
-    "id": "evc8n93x",
-    "name": "Sargento Balanced Breaks",
+    "id": "qlje0p18",
+    "name": "Cheese & Crackers Snack Pack",
     "category": "Dairy",
     "quantity": "",
-    "notes": "Cheese & Ritz Crackers",
-    "status": "have"
-  },
-  {
-    "id": "4gi4h4te",
-    "name": "Country Crock Calcium Spread",
-    "category": "Dairy",
-    "quantity": "15 oz",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "lzs604na",
-    "name": "Greek Yogurt Plain Traditional",
+    "id": "d6xqcna3",
+    "name": "Vegetable Oil Spread",
     "category": "Dairy",
-    "quantity": "24 oz",
-    "notes": "The Greek Gods",
+    "quantity": "15 oz",
+    "notes": "High calcium",
     "status": "have"
   },
   {
-    "id": "usfboaz3",
-    "name": "Fairlife Fat Free Ultra-Filtered Milk",
+    "id": "3ck3r13m",
+    "name": "Greek Yogurt (Plain)",
+    "category": "Dairy",
+    "quantity": "24 oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "t75au9cw",
+    "name": "Fat Free Ultra-Filtered Milk",
     "category": "Dairy",
     "quantity": "52 fl oz x2",
     "notes": "Lactose free",
     "status": "have"
   },
   {
-    "id": "v3bchqch",
+    "id": "qvexjpos",
     "name": "Whole Milk",
     "category": "Dairy",
     "quantity": "1/2 gallon",
-    "notes": "Meijer",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "xn7j4g8n",
-    "name": "Starbucks Caramel Macchiato Zero Creamer",
+    "id": "s5ao008n",
+    "name": "Caramel Macchiato Creamer (Zero Sugar)",
     "category": "Dairy",
     "quantity": "",
-    "notes": "0g added sugar",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "pm13lukx",
+    "id": "6ajz13gy",
     "name": "Eggs",
     "category": "Dairy",
     "quantity": "~13",
@@ -704,175 +744,47 @@
     "status": "have"
   },
   {
-    "id": "he58cctt",
-    "name": "Jimmy Dean Pork Sausage Links",
-    "category": "Meat & Seafood",
-    "quantity": "12 count",
-    "notes": "Original, fully cooked",
-    "status": "have"
-  },
-  {
-    "id": "ow7tjyud",
-    "name": "Eckrich Hard Salami",
-    "category": "Meat & Seafood",
+    "id": "fygn8hsi",
+    "name": "Flour Tortillas",
+    "category": "Grains & Pasta",
     "quantity": "",
-    "notes": "Pre-sliced deli",
+    "notes": "Super soft",
     "status": "have"
   },
   {
-    "id": "umaq4ppb",
-    "name": "Hardwood Smoked Bacon",
-    "category": "Meat & Seafood",
-    "quantity": "16 oz",
-    "notes": "Meijer",
-    "status": "have"
-  },
-  {
-    "id": "t1r9eufy",
-    "name": "Hot Dogs",
-    "category": "Meat & Seafood",
-    "quantity": "",
-    "notes": "",
-    "status": "have"
-  },
-  {
-    "id": "fqgk43vi",
-    "name": "Beef Rib Shaved Steak",
-    "category": "Meat & Seafood",
-    "quantity": "14 oz",
-    "notes": "Bertolino Certified Angus Beef",
-    "status": "have"
-  },
-  {
-    "id": "dz5hu19z",
-    "name": "Deli Ham",
-    "category": "Meat & Seafood",
-    "quantity": "",
-    "notes": "",
-    "status": "have"
-  },
-  {
-    "id": "rtcslw8j",
-    "name": "Lemons",
-    "category": "Produce",
-    "quantity": "~9",
-    "notes": "",
-    "status": "have"
-  },
-  {
-    "id": "ji69lwy2",
-    "name": "Blackberries",
-    "category": "Produce",
-    "quantity": "1 pint",
-    "notes": "Driscoll's",
-    "status": "have"
-  },
-  {
-    "id": "oj3jq5p6",
-    "name": "Blueberries",
-    "category": "Produce",
-    "quantity": "1 pint",
-    "notes": "Naturipe",
-    "status": "have"
-  },
-  {
-    "id": "c6xtr8jh",
-    "name": "Carrot Chips",
-    "category": "Produce",
-    "quantity": "",
-    "notes": "O Organics",
-    "status": "have"
-  },
-  {
-    "id": "laimn8iy",
-    "name": "Claussen Kosher Dill Halves",
-    "category": "Condiments",
-    "quantity": "2 jars",
-    "notes": "",
-    "status": "have"
-  },
-  {
-    "id": "dmmuxs86",
-    "name": "Hot Cherry Salsa",
-    "category": "Condiments",
-    "quantity": "16 oz",
-    "notes": "Cherry Republic",
-    "status": "have"
-  },
-  {
-    "id": "gddvgzt0",
-    "name": "Whole Sweet Gherkins",
-    "category": "Condiments",
-    "quantity": "",
-    "notes": "Kroger",
-    "status": "have"
-  },
-  {
-    "id": "47t1u4uw",
-    "name": "Pepperoncini",
-    "category": "Condiments",
-    "quantity": "12 oz",
-    "notes": "Mt. Olive",
-    "status": "have"
-  },
-  {
-    "id": "cbp1vhxn",
-    "name": "Roasted Bell Peppers",
-    "category": "Condiments",
-    "quantity": "16 fl oz",
-    "notes": "Mezzetta mild",
-    "status": "have"
-  },
-  {
-    "id": "khbu4scd",
-    "name": "Soy Sauce",
-    "category": "Condiments",
-    "quantity": "15 fl oz",
-    "notes": "Kikkoman",
-    "status": "have"
-  },
-  {
-    "id": "tcnmqkpn",
-    "name": "Worcestershire Sauce",
-    "category": "Condiments",
-    "quantity": "",
-    "notes": "Great Value",
-    "status": "have"
-  },
-  {
-    "id": "17ft9egs",
-    "name": "Ranch Dressing & Dip (Light)",
-    "category": "Condiments",
-    "quantity": "16 fl oz",
-    "notes": "Meijer",
-    "status": "have"
-  },
-  {
-    "id": "3yf0ety8",
-    "name": "Mayonnaise",
-    "category": "Condiments",
-    "quantity": "19 fl oz",
-    "notes": "Hellmann's Real",
-    "status": "have"
-  },
-  {
-    "id": "j9m9sdp9",
-    "name": "Dill Pickle Bites (Oh Snap!)",
-    "category": "Condiments",
-    "quantity": "",
-    "notes": "",
-    "status": "have"
-  },
-  {
-    "id": "t8nirac9",
-    "name": "Pillsbury Cinnamon Rolls with Icing",
+    "id": "bzbmd4ww",
+    "name": "Corn Syrup (Light)",
     "category": "Baking",
-    "quantity": "2 cans",
-    "notes": "8 rolls each",
+    "quantity": "",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "e0x5bjih",
+    "id": "d8etl7dz",
+    "name": "Almond Extract",
+    "category": "Baking",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "z2mlorng",
+    "name": "Lemon Extract (Organic)",
+    "category": "Baking",
+    "quantity": "2 fl oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "fung8z4c",
+    "name": "Cinnamon Rolls with Icing",
+    "category": "Baking",
+    "quantity": "2 cans (8 rolls each)",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "7pvr5wy6",
     "name": "All-Purpose Flour",
     "category": "Baking",
     "quantity": "",
@@ -880,163 +792,235 @@
     "status": "have"
   },
   {
-    "id": "gbm3kogx",
-    "name": "Tombstone Original Crust Pizza",
+    "id": "r3avs10o",
+    "name": "Pork Sausage Links",
+    "category": "Meat & Seafood",
+    "quantity": "12 count",
+    "notes": "Fully cooked",
+    "status": "have"
+  },
+  {
+    "id": "j9cxpwaa",
+    "name": "Hard Salami",
+    "category": "Meat & Seafood",
+    "quantity": "",
+    "notes": "Pre-sliced deli",
+    "status": "have"
+  },
+  {
+    "id": "r66zfvaq",
+    "name": "Bacon (Hardwood Smoked)",
+    "category": "Meat & Seafood",
+    "quantity": "16 oz",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "rqb3htie",
+    "name": "Hot Dogs",
+    "category": "Meat & Seafood",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "9hlyy8z3",
+    "name": "Shaved Beef Rib Steak",
+    "category": "Meat & Seafood",
+    "quantity": "14 oz",
+    "notes": "Certified Angus",
+    "status": "have"
+  },
+  {
+    "id": "f9tuuuut",
+    "name": "Deli Ham",
+    "category": "Meat & Seafood",
+    "quantity": "",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "9u62ma8x",
+    "name": "Lemons",
+    "category": "Produce",
+    "quantity": "~9",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "ae5av992",
+    "name": "Blackberries",
+    "category": "Produce",
+    "quantity": "1 pint",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "xn5jmtt8",
+    "name": "Blueberries",
+    "category": "Produce",
+    "quantity": "1 pint",
+    "notes": "",
+    "status": "have"
+  },
+  {
+    "id": "d3cezncf",
+    "name": "Carrot Chips",
+    "category": "Produce",
+    "quantity": "",
+    "notes": "Organic",
+    "status": "have"
+  },
+  {
+    "id": "baawl8hs",
+    "name": "Frozen Pizza (Original Crust)",
     "category": "Frozen",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "e1uwtgvt",
+    "id": "mp25t4mx",
     "name": "Steak Cut Fries",
     "category": "Frozen",
     "quantity": "",
-    "notes": "Signature Select",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "zzor0ayc",
+    "id": "zl46kym2",
     "name": "Crispy Breaded Green Beans",
     "category": "Frozen",
     "quantity": "",
-    "notes": "Birds Eye",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "awi3nx55",
+    "id": "mqhwu08n",
     "name": "Shredded Hash Browns",
     "category": "Frozen",
     "quantity": "30 oz",
-    "notes": "Meijer",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "81cd8h6k",
-    "name": "Mozzarella Cheese Stuffed Breadsticks",
+    "id": "z99t5dqz",
+    "name": "Mozzarella Stuffed Breadsticks",
     "category": "Frozen",
     "quantity": "2 boxes",
-    "notes": "Signature Select",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "8e5yh150",
+    "id": "u6ag90wc",
     "name": "White Bread",
     "category": "Frozen",
     "quantity": "",
-    "notes": "Jewel (in freezer)",
+    "notes": "In freezer",
     "status": "have"
   },
   {
-    "id": "hywwrq0y",
-    "name": "Freeze Pops / Popsicles",
+    "id": "uj9piysg",
+    "name": "Freeze Pops",
     "category": "Frozen",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "pvkhphiv",
+    "id": "6s48wsd9",
     "name": "Orange Juice (Pulp Free)",
     "category": "Beverages",
     "quantity": "",
-    "notes": "Minute Maid",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "vuqljelh",
-    "name": "Zero Sugar Lemon Lime Soda",
+    "id": "si419a1d",
+    "name": "Lemon Lime Soda (Zero Sugar)",
     "category": "Beverages",
     "quantity": "2L",
-    "notes": "Signature Select",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "j2f2as3j",
+    "id": "0yr6h49m",
     "name": "Diet Cola",
     "category": "Beverages",
     "quantity": "2L",
-    "notes": "Signature Select",
-    "status": "have"
-  },
-  {
-    "id": "2tsagmyi",
-    "name": "Red Wine (Autumn Black)",
-    "category": "Beverages",
-    "quantity": "",
-    "notes": "Salt of the Earth",
-    "status": "have"
-  },
-  {
-    "id": "cd5a7gau",
-    "name": "Red Wine (The One)",
-    "category": "Beverages",
-    "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "owp0iqww",
+    "id": "zqbf602s",
+    "name": "Red Wine",
+    "category": "Beverages",
+    "quantity": "",
+    "notes": "2 bottles",
+    "status": "have"
+  },
+  {
+    "id": "84mrpc0b",
     "name": "Mango White Wine",
     "category": "Beverages",
     "quantity": "",
-    "notes": "Il Conte",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "861i5i42",
-    "name": "Capri Sun Strawberry",
+    "id": "t6rzfumc",
+    "name": "Juice Pouches (Strawberry)",
     "category": "Beverages",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "kbx9mj6t",
-    "name": "Honest Kids Apple Juice Boxes",
+    "id": "fud6534u",
+    "name": "Apple Juice Boxes",
     "category": "Beverages",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "oa9kyggd",
-    "name": "Hawaiian Punch",
+    "id": "maqm2wmg",
+    "name": "Fruit Punch",
     "category": "Beverages",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "e45fh7mk",
-    "name": "Premier Protein Caf\u00e9 Latte",
+    "id": "ajyveb59",
+    "name": "Protein Shake (Caf\u00e9 Latte)",
     "category": "Beverages",
     "quantity": "",
     "notes": "30g protein",
     "status": "have"
   },
   {
-    "id": "wodtrbig",
-    "name": "Vanilla Ultra-Filtered Milk Shake",
+    "id": "oj9fgpq7",
+    "name": "Vanilla Protein Milk Shake",
     "category": "Beverages",
     "quantity": "11.5 fl oz",
-    "notes": "Member's Mark",
+    "notes": "",
     "status": "have"
   },
   {
-    "id": "hoty407o",
-    "name": "Minute Maid Lemonade",
+    "id": "8ihgzqs0",
+    "name": "Lemonade",
     "category": "Beverages",
     "quantity": "",
     "notes": "",
     "status": "have"
   },
   {
-    "id": "fwo0puzy",
-    "name": "Perfect Bar Dark Chocolate Peanut Butter",
+    "id": "hl8g2n5k",
+    "name": "Dark Chocolate Peanut Butter Protein Bar",
     "category": "Other",
     "quantity": "2",
-    "notes": "Refrigerated protein bar",
+    "notes": "Refrigerated",
     "status": "have"
   }
 ]
