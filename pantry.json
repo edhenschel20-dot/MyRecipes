@@ -1022,5 +1022,13 @@
     "quantity": "2",
     "notes": "Refrigerated",
     "status": "have"
+  },
+  {
+    "id": "gpsn1rf0",
+    "name": "American Cheese Slices",
+    "category": "Dairy",
+    "quantity": "8 slices",
+    "notes": "",
+    "status": "have"
   }
 ]
