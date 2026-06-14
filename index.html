@@ -570,7 +570,7 @@ function GitHubSettingsModal({ onClose, onSaved }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
         <div className="modal-title">☁️ Supabase Sync</div>
         <p style={{fontSize:13,color:"var(--ink-light)",marginBottom:16}}>
           Your recipes, pantry, and calendar sync automatically across all devices in real time.
