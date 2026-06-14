@@ -467,7 +467,7 @@ function recipeToRow(r) {
     description: r.description || "",
     favorite: r.favorite || false,
     source: r.source || "",
-    photos: [],
+    photos: (r.photos||[]).filter(p => p && !p.startsWith('data:')),
     updated_at: new Date().toISOString()
   };
 }
@@ -497,7 +497,7 @@ function rowToRecipe(row) {
     description: row.description || "",
     favorite: row.favorite || false,
     source: row.source || "",
-    photos: []
+    photos: row.photos || []
   };
 }
 
