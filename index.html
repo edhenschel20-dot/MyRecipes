@@ -2618,9 +2618,11 @@ function PantryTab({ recipes, version }) {
   const [editItem, setEditItem] = useState(null);
   const [expandedCats, setExpandedCats] = useState({});
 
+  const pantryMounted = useRef(false);
   useEffect(()=>{ 
     savePantry(items);
-    // Sync to GitHub if enabled
+    // Only sync to GitHub after first render (skip initial localStorage load)
+    if (!pantryMounted.current) { pantryMounted.current = true; return; }
     const prefs = loadGitHubPrefs();
     if (prefs.enabled && prefs.token) {
       const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
