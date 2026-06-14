@@ -409,246 +409,205 @@ const SAMPLE_RECIPES = [
 ];
 
 
-// ── GitHub Sync ────────────────────────────────────────────────────────────
-const GITHUB_PREFS_KEY = "recipebook_github_v1";
+// ── Supabase Sync ────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://ejfclvtttwzmxxjnqwcm.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqZmNsdnR0dHd6bXh4am5xd2NtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDIyNTQsImV4cCI6MjA5Njk3ODI1NH0.YOPnHz8HdMkwxMfaADLrK4i8aDZG68wy-EEjWjRRCm8";
+const SYNC_PREFS_KEY = "recipebook_supabase_v1";
 
-function loadGitHubPrefs() {
-  try { return JSON.parse(localStorage.getItem(GITHUB_PREFS_KEY)||"{}"); } catch { return {}; }
+function loadSyncPrefs() {
+  try { return JSON.parse(localStorage.getItem(SYNC_PREFS_KEY)||"{}"); } catch { return {}; }
 }
-function saveGitHubPrefs(p) { try { localStorage.setItem(GITHUB_PREFS_KEY, JSON.stringify(p)); } catch {} }
+function saveSyncPrefs(p) { try { localStorage.setItem(SYNC_PREFS_KEY, JSON.stringify(p)); } catch {} }
 
-// GitHub API helpers
-async function githubRequest(token, repo, method, path, body) {
-  const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-    method,
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Accept": "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(()=>({}));
-    throw new Error(err.message || `GitHub API error ${res.status}`);
-  }
-  return res.json();
-}
-
-async function githubGetFile(token, repo, path) {
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Accept": "application/vnd.github+json",
-      }
-    });
-    if (res.status === 404) return { content: null, sha: null };
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub ${res.status}: ${txt.slice(0,100)}`);
-    }
-    const data = await res.json();
-    if (!data.content) return { content: null, sha: data.sha||null };
-    const decoded = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g,"")))));
-    return { content: decoded, sha: data.sha };
-  } catch(e) {
-    if (e.message && (e.message.includes("404") || e.message.includes("Not Found"))) return { content: null, sha: null };
-    throw e;
-  }
-}
-
-async function githubPutFile(token, repo, path, content, sha, message) {
-  const body = {
-    message: message || `Update ${path}`,
-    content: btoa(unescape(encodeURIComponent(JSON.stringify(content, null, 2)))),
-  };
-  if (sha) body.sha = sha;
-  const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-    method: "PUT",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Accept": "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`GitHub ${res.status}: ${txt.slice(0,200)}`);
-  }
-  return res.json();
-}
-
-// High-level sync functions
-async function syncToGitHub(prefs, data, pantry, calendar) {
-  const { token, repo } = prefs;
-  if (!token || !repo) return;
-  // Write files sequentially to avoid SHA conflicts
-  try {
-    const rFile = await githubGetFile(token, repo, "recipes.json");
-    await githubPutFile(token, repo, "recipes.json", data, rFile.sha, "Update recipes");
-  } catch(e) { console.error("recipes sync failed:", e.message); throw e; }
-  try {
-    const pFile = await githubGetFile(token, repo, "pantry.json");
-    await githubPutFile(token, repo, "pantry.json", pantry, pFile.sha, "Update pantry");
-  } catch(e) { console.error("pantry sync failed:", e.message); throw e; }
-  try {
-    const cFile = await githubGetFile(token, repo, "calendar.json");
-    await githubPutFile(token, repo, "calendar.json", calendar, cFile.sha, "Update calendar");
-  } catch(e) { console.error("calendar sync failed:", e.message); throw e; }
-  return true;
-}
-
-async function loadFromGitHub(prefs) {
-  const { token, repo } = prefs;
-  if (!token || !repo) return null;
-  const safeGet = async (path) => { try { return await githubGetFile(token, repo, path); } catch(e) { console.warn("GitHub fetch failed for", path, e.message); return { content: null, sha: null }; } };
-  const [rFile, pFile, cFile] = await Promise.all([
-    safeGet("recipes.json"),
-    safeGet("pantry.json"),
-    safeGet("calendar.json"),
-  ]);
+function sbHeaders() {
   return {
-    recipes: rFile.content,
-    pantry: pFile.content,
-    calendar: cFile.content,
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json"
   };
 }
 
-// ── GitHub Settings Modal ──────────────────────────────────────────────────
-function GitHubSettingsModal({ onClose, onSaved }) {
-  const [prefs, setPrefs] = useState(()=>loadGitHubPrefs());
-  const [token, setToken] = useState(prefs.token||"");
-  const [repo, setRepo] = useState(prefs.repo||"edhenschel20-dot/MyRecipes");
-  const [testing, setTesting] = useState(false);
-  const [status, setStatus] = useState("");
-  const [syncing, setSyncing] = useState(false);
+async function sbGet(table) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`, { headers: sbHeaders() });
+  if (!res.ok) throw new Error(`Supabase GET ${table} failed: ${res.status}`);
+  return res.json();
+}
 
-  async function testConnection() {
-    setTesting(true); setStatus("");
-    try {
-      const res = await fetch(`https://api.github.com/repos/${repo}`, {
-        headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" }
-      });
-      if (!res.ok) throw new Error("Could not access repo — check token and repo name");
-      setStatus("ok:✓ Connected! Token works.");
-    } catch(e) { setStatus("err:" + e.message); }
-    setTesting(false);
+async function sbUpsert(table, rows) {
+  if (!rows || rows.length === 0) return;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: "POST",
+    headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(rows)
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Supabase upsert ${table} failed: ${res.status} ${t.slice(0,100)}`); }
+}
+
+function recipeToRow(r) {
+  return {
+    id: r.id || ("r" + Math.random().toString(36).slice(2,9)),
+    title: r.title || r.name || "",
+    cuisine: r.cuisine || "",
+    categories: r.categories || [],
+    servings: r.servings || null,
+    prep_time: r.prepTime || r.prep_time || null,
+    cook_time: r.cookTime || r.cook_time || null,
+    tags: r.tags || [],
+    diets: r.diets || [],
+    calories: r.calories || null,
+    protein: r.protein || null,
+    carbs: r.carbs || null,
+    fat: r.fat || null,
+    fiber: r.fiber || null,
+    sugar: r.sugar || null,
+    sodium: r.sodium || null,
+    ingredients: r.ingredients || [],
+    steps: r.steps || [],
+    notes: r.notes || "",
+    description: r.description || "",
+    favorite: r.favorite || false,
+    source: r.source || "",
+    photos: [],
+    updated_at: new Date().toISOString()
+  };
+}
+
+function rowToRecipe(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    name: row.title,
+    cuisine: row.cuisine,
+    categories: row.categories || [],
+    servings: row.servings,
+    prepTime: row.prep_time,
+    cookTime: row.cook_time,
+    tags: row.tags || [],
+    diets: row.diets || [],
+    calories: row.calories,
+    protein: row.protein,
+    carbs: row.carbs,
+    fat: row.fat,
+    fiber: row.fiber,
+    sugar: row.sugar,
+    sodium: row.sodium,
+    ingredients: row.ingredients || [],
+    steps: row.steps || [],
+    notes: row.notes || "",
+    description: row.description || "",
+    favorite: row.favorite || false,
+    source: row.source || "",
+    photos: []
+  };
+}
+
+async function syncToSupabase(recipes, pantryItems, calendarData) {
+  if (recipes && recipes.length > 0) {
+    await sbUpsert("recipes", recipes.map(recipeToRow));
   }
+  if (pantryItems && pantryItems.length > 0) {
+    const rows = pantryItems.map(p => ({
+      id: p.id || ("p" + Math.random().toString(36).slice(2,9)),
+      name: p.name,
+      category: p.category || "Other",
+      status: p.status || "have",
+      quantity: p.quantity || "",
+      notes: p.notes || "",
+      updated_at: new Date().toISOString()
+    }));
+    await sbUpsert("pantry", rows);
+  }
+  if (calendarData && typeof calendarData === "object") {
+    const calRows = [];
+    for (const [date, slots] of Object.entries(calendarData)) {
+      for (const [slot, entry] of Object.entries(slots)) {
+        if (entry && entry.id) {
+          calRows.push({ date, slot, recipe_id: entry.id, servings: entry.servings || 1, leftover: entry.leftover || false, updated_at: new Date().toISOString() });
+        }
+      }
+    }
+    if (calRows.length > 0) await sbUpsert("calendar", calRows);
+  }
+}
 
-  function save() {
-    const p = { token, repo, enabled: !!(token && repo) };
-    saveGitHubPrefs(p);
-    setPrefs(p);
+async function loadFromSupabase() {
+  const [recipeRows, pantryRows, calRows] = await Promise.all([
+    sbGet("recipes"), sbGet("pantry"), sbGet("calendar")
+  ]);
+  const recipes = recipeRows.map(rowToRecipe);
+  const pantry = pantryRows;
+  const calendar = {};
+  for (const row of calRows) {
+    if (!calendar[row.date]) calendar[row.date] = {};
+    calendar[row.date][row.slot] = { id: row.recipe_id, servings: row.servings, leftover: row.leftover };
+  }
+  return { recipes, pantry, calendar };
+}
+
+// ── Sync Settings Modal ──────────────────────────────────────────────────────
+function GitHubSettingsModal({ onClose, onSaved }) {
+  const [prefs, setPrefs] = React.useState(()=>loadSyncPrefs());
+  const [status, setStatus] = React.useState("");
+  const [syncing, setSyncing] = React.useState(false);
+
+  async function save() {
+    const p = { ...prefs, enabled: true };
+    saveSyncPrefs(p);
     onSaved(p);
-    onClose();
+    setStatus("ok:✓ Saved & enabled!");
+    setTimeout(()=>setStatus(""), 2000);
   }
 
   function disconnect() {
-    const p = { token:"", repo, enabled:false };
-    saveGitHubPrefs(p);
+    const p = { enabled: false };
+    saveSyncPrefs(p);
     onSaved(p);
     onClose();
   }
 
-  const statusType = status.split(":")[0];
-  const statusMsg = status.split(":").slice(1).join(":");
+  const statusType = status.startsWith("ok") ? "success" : status.startsWith("err") ? "error" : "";
+  const statusMsg = status.slice(status.indexOf(":")+1);
 
   return (
-    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{maxWidth:480}}>
-        <div className="modal-title">⚙️ GitHub Sync</div>
-        <p style={{fontSize:13,color:"var(--ink-light)",marginBottom:20,lineHeight:1.6}}>
-          Store your recipes, pantry, and calendar in GitHub so Claude can update them directly from chat — and so you and your wife always share the same data.
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">☁️ Supabase Sync</div>
+        <p style={{fontSize:13,color:"var(--ink-light)",marginBottom:16}}>
+          Your recipes, pantry, and calendar sync automatically across all devices in real time.
         </p>
-
-        <div className="form-group">
-          <label className="form-label">GitHub Repository</label>
-          <input className="form-input" value={repo} onChange={e=>setRepo(e.target.value)} placeholder="username/repo-name" />
-          <div style={{fontSize:11,color:"var(--ink-light)",marginTop:4}}>e.g. edhenschel20-dot/MyRecipes</div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">Personal Access Token</label>
-          <input className="form-input" type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="ghp_..." />
-          <div style={{fontSize:11,color:"var(--ink-light)",marginTop:4}}>
-            Create at github.com → Settings → Developer settings → Personal access tokens (classic) → check "repo"
-          </div>
-        </div>
-
-        {status && (
-          <div style={{padding:"10px 14px",borderRadius:3,fontSize:13,marginBottom:12,
-            background:statusType==="ok"?"#d4e8d0":"#fde8e4",
-            color:statusType==="ok"?"var(--sage)":"var(--rust)",
-            border:`1px solid ${statusType==="ok"?"#b0d4aa":"var(--rust)"}`}}>
-            {statusMsg}
-          </div>
-        )}
-
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn btn-outline btn-sm" onClick={testConnection} disabled={!token||!repo||testing}>
-            {testing?"Testing…":"Test Connection"}
-          </button>
-          <button className="btn btn-primary" onClick={save} disabled={!token||!repo}>Save & Enable</button>
-          {prefs.enabled && <button className="btn btn-ghost btn-sm" onClick={disconnect}>Disconnect</button>}
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        </div>
-
-        {prefs.enabled && (
-          <div style={{marginTop:16,padding:"12px 14px",background:"var(--parchment-dark)",borderRadius:4,fontSize:13}}>
-            <div style={{fontWeight:700,marginBottom:8}}>✓ Sync is active</div>
-            <div style={{color:"var(--ink-light)",marginBottom:12}}>Data syncs to GitHub on every save. Files are stored in <code>data/</code> folder of your repo.</div>
-            <button className="btn btn-outline btn-sm" onClick={async()=>{
+        {status && <div className={`sync-status ${statusType}`}>{statusMsg}</div>}
+        <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+          <button className="btn btn-primary" onClick={save}>Save & Enable</button>
+          {prefs.enabled && (
+            <button className="btn btn-outline" onClick={async()=>{
               setSyncing(true); setStatus("");
               try {
-                // Pull from GitHub first, then merge with local
                 let recipeData = {};
                 let pantryData = [];
                 let calData = {};
                 try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
-                try { pantryData = JSON.parse(localStorage.getItem("recipebook_pantry_v1")||"[]"); } catch{}
-                try { calData = JSON.parse(localStorage.getItem("recipebook_calendar_v1")||"{}"); } catch{}
-                if (!Array.isArray(pantryData)) pantryData = [];
-                if (typeof calData !== "object" || Array.isArray(calData)) calData = {};
-                if (typeof recipeData !== "object" || Array.isArray(recipeData)) recipeData = {};
-                // Fetch GitHub versions and merge (GitHub wins for pantry & calendar)
-                try {
-                  const ghData = await loadFromGitHub({token, repo});
-                  if (ghData) {
-                    if (Array.isArray(ghData.pantry) && ghData.pantry.length > 0) {
-                      // Merge: combine GitHub + local, dedupe by id
-                      const ghIds = new Set(ghData.pantry.map(i=>i.id));
-                      const localOnly = pantryData.filter(i=>!ghIds.has(i.id));
-                      pantryData = [...ghData.pantry, ...localOnly];
-                      localStorage.setItem("recipebook_pantry_v1", JSON.stringify(pantryData));
-                    }
-                    if (ghData.calendar && typeof ghData.calendar === "object") {
-                      calData = Object.assign({}, ghData.calendar, calData);
-                      localStorage.setItem("recipebook_calendar_v1", JSON.stringify(calData));
-                    }
-                    if (ghData.recipes && ghData.recipes.recipes) {
-                      const ghRecipeIds = new Set(ghData.recipes.recipes.map(r=>r.id));
-                      const localOnlyRecipes = (recipeData.recipes||[]).filter(r=>!ghRecipeIds.has(r.id));
-                      recipeData = {...recipeData, recipes: [...ghData.recipes.recipes, ...localOnlyRecipes]};
-                    }
-                  }
-                } catch(mergeErr) { console.warn("GitHub merge fetch failed, pushing local:", mergeErr); }
-                await syncToGitHub({token,repo}, recipeData, pantryData, calData);
+                try { pantryData = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]"); } catch{}
+                try { calData = JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); } catch{}
+                await syncToSupabase(recipeData.recipes||[], pantryData, calData);
                 setStatus("ok:✓ Synced successfully!");
-              } catch(e) {
-                setStatus("err:" + (e.message||"Unknown error"));
-              }
+              } catch(e) { setStatus("err:" + (e.message||"Unknown error")); }
               setSyncing(false);
-            }} disabled={syncing}>
-              {syncing ? "Syncing…" : "⟳ Sync Now"}
-            </button>
+            }} disabled={syncing}>{syncing?"Syncing…":"⟳ Sync Now"}</button>
+          )}
+          {prefs.enabled && <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>}
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+        {prefs.enabled && (
+          <div style={{marginTop:16,padding:"12px 14px",background:"var(--parchment-dark)",borderRadius:4,fontSize:13}}>
+            <div style={{fontWeight:700,marginBottom:4}}>✓ Sync is active</div>
+            <div style={{color:"var(--ink-light)"}}>Data syncs automatically on every change across all your devices.</div>
           </div>
         )}
       </div>
     </div>
   );
 }
+
 
 
 // ── Recipe normalizer ────────────────────────────────────────────────────
@@ -751,7 +710,7 @@ function RecipeBook() {
   const [dinnerCookMode, setDinnerCookMode] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [showGitHubSettings, setShowGitHubSettings] = useState(false);
-  const [githubPrefs, setGitHubPrefs] = useState(()=>loadGitHubPrefs());
+  const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
   const [pantryVersion, setPantryVersion] = useState(0);
@@ -760,24 +719,25 @@ function RecipeBook() {
     setLightbox({ src: photo, photos: photos||[photo], index: index||0 });
   }
   const recipes = data.recipes;
-  // Load from GitHub on startup if enabled
+  // Load from Supabase on startup if enabled
   useEffect(() => {
-    async function loadFromGH() {
-      const prefs = loadGitHubPrefs();
-      if (!prefs.enabled || !prefs.token || !prefs.repo) return;
+    async function loadFromSB() {
+      const prefs = loadSyncPrefs();
+      if (!prefs.enabled) { githubReady.current = true; return; }
       try {
         setSyncStatus("syncing");
-        const ghData = await loadFromGitHub(prefs);
-        if (ghData) {
-          if (ghData.recipes && ghData.recipes.recipes) {
-            setData(d => ({...d, recipes: ghData.recipes.recipes.map(normalizeRecipe)}));
+        const sbData = await loadFromSupabase();
+        if (sbData) {
+          if (sbData.recipes && sbData.recipes.length > 0) {
+            setData(d => ({...d, recipes: sbData.recipes.map(normalizeRecipe)}));
           }
-          if (ghData.pantry) {
-            // Pantry is managed by PantryTab via its own localStorage — trigger a reload signal
-            if (Array.isArray(ghData.pantry)) { localStorage.setItem(PANTRY_KEY, JSON.stringify(ghData.pantry)); setPantryVersion(v=>v+1); }
+          if (Array.isArray(sbData.pantry) && sbData.pantry.length > 0) {
+            localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry));
+            setPantryVersion(v=>v+1);
           }
-          if (ghData.calendar) {
-            if (typeof ghData.calendar === "object") { localStorage.setItem(CAL_KEY, JSON.stringify(ghData.calendar)); setCalVersion(v=>v+1); }
+          if (sbData.calendar && Object.keys(sbData.calendar).length > 0) {
+            localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar));
+            setCalVersion(v=>v+1);
           }
         }
         githubReady.current = true;
@@ -785,24 +745,21 @@ function RecipeBook() {
         setTimeout(()=>setSyncStatus(""), 2000);
       } catch(e) {
         githubReady.current = true;
-        setSyncStatus("error");
-        setTimeout(()=>setSyncStatus(""), 3000);
+        setSyncStatus("error:" + e.message);
+        setTimeout(()=>setSyncStatus(""), 5000);
       }
     }
-    // If GitHub not configured, mark ready immediately
-    const _p = loadGitHubPrefs();
-    if (!_p.enabled || !_p.token || !_p.repo) githubReady.current = true;
-    loadFromGH();
+    loadFromSB();
   }, []);
 
   // Save to localStorage always; sync to GitHub only after startup load is complete
   useEffect(() => {
     saveData(data);
-    if (githubPrefs.enabled && githubPrefs.token && githubReady.current) {
+    if (githubPrefs.enabled && githubReady.current) {
       const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
       const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
       setSyncStatus("syncing");
-      syncToGitHub(githubPrefs, data, pantry, calendar)
+      syncToSupabase(data.recipes||[], pantry, calendar)
         .then(()=>{ setSyncStatus("ok"); setTimeout(()=>setSyncStatus(""), 2000); })
         .catch(e=>{ setSyncStatus("error:" + (e.message||"unknown")); setTimeout(()=>setSyncStatus(""), 8000); });
     }
@@ -2619,11 +2576,11 @@ function PantryTab({ recipes, version }) {
   useEffect(()=>{ 
     savePantry(items);
     if (!pantryMounted.current) { pantryMounted.current = true; return; }
-    const prefs = loadGitHubPrefs();
-    if (prefs.enabled && prefs.token) {
+    const prefs = loadSyncPrefs();
+    if (prefs.enabled) {
       const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
       const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
-      syncToGitHub(prefs, recipeData, items, calendar).catch(()=>{});
+      syncToSupabase(recipeData.recipes||[], items, calendar).catch(()=>{});
     }
   }, [items]);
 
