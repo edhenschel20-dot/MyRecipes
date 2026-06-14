@@ -795,8 +795,10 @@ function RecipeBook() {
   }, []);
 
   // Save to localStorage (always) and GitHub (if enabled) whenever data changes
+  const appMounted = useRef(false);
   useEffect(() => {
     saveData(data);
+    if (!appMounted.current) { appMounted.current = true; return; }
     if (githubPrefs.enabled && githubPrefs.token && githubReady.current) {
       const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
       const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
