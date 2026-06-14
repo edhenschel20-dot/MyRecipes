@@ -753,7 +753,6 @@ function RecipeBook() {
   const [showGitHubSettings, setShowGitHubSettings] = useState(false);
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadGitHubPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
-  const githubReady = useRef(false);
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -780,33 +779,19 @@ function RecipeBook() {
             if (typeof ghData.calendar === "object") { localStorage.setItem(CAL_KEY, JSON.stringify(ghData.calendar)); setCalVersion(v=>v+1); }
           }
         }
-        githubReady.current = true;
         setSyncStatus("ok");
         setTimeout(()=>setSyncStatus(""), 2000);
       } catch(e) {
-        githubReady.current = true;
         setSyncStatus("error");
         setTimeout(()=>setSyncStatus(""), 3000);
       }
     }
-    const _prefs = loadGitHubPrefs();
-    if (!_prefs.enabled || !_prefs.token || !_prefs.repo) githubReady.current = true;
     loadFromGH();
   }, []);
 
-  // Save to localStorage (always) and GitHub (if enabled) whenever data changes
-  const appMounted = useRef(false);
+  // Save to localStorage whenever data changes (GitHub sync is manual only)
   useEffect(() => {
     saveData(data);
-    if (!appMounted.current) { appMounted.current = true; return; }
-    if (githubPrefs.enabled && githubPrefs.token && githubReady.current) {
-      const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
-      const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
-      setSyncStatus("syncing");
-      syncToGitHub(githubPrefs, data, pantry, calendar)
-        .then(()=>{ setSyncStatus("ok"); setTimeout(()=>setSyncStatus(""), 2000); })
-        .catch(e=>{ setSyncStatus("error:" + (e.message||"unknown")); setTimeout(()=>setSyncStatus(""), 8000); });
-    }
   }, [data]);
 
   function toggleFavorite(id) {
@@ -2616,17 +2601,8 @@ function PantryTab({ recipes, version }) {
   const [editItem, setEditItem] = useState(null);
   const [expandedCats, setExpandedCats] = useState({});
 
-  const pantryMounted = useRef(false);
   useEffect(()=>{ 
     savePantry(items);
-    // Only sync to GitHub after first render (skip initial localStorage load)
-    if (!pantryMounted.current) { pantryMounted.current = true; return; }
-    const prefs = loadGitHubPrefs();
-    if (prefs.enabled && prefs.token) {
-      const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
-      const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
-      syncToGitHub(prefs, recipeData, items, calendar).catch(()=>{});
-    }
   }, [items]);
 
   function upsert(item) {
@@ -2912,12 +2888,6 @@ function CalendarTab({ recipes, version }) {
 
   useEffect(()=>{
     saveCalendar(calData);
-    const prefs2 = loadGitHubPrefs();
-    if (prefs2.enabled && prefs2.token) {
-      const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
-      const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
-      syncToGitHub(prefs2, recipeData, pantry, calData).catch(()=>{});
-    }
   },[calData]);
   useEffect(()=>{ saveCalPrefs(prefs); },[prefs]);
 
