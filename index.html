@@ -553,6 +553,7 @@ function GitHubSettingsModal({ onClose, onSaved }) {
   async function save() {
     const p = { ...prefs, enabled: true };
     saveSyncPrefs(p);
+    setPrefs(p);
     onSaved(p);
     setStatus("ok:✓ Saved & enabled!");
     setTimeout(()=>setStatus(""), 2000);
