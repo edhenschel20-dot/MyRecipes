@@ -736,6 +736,7 @@ function RecipeBook() {
   const [showGitHubSettings, setShowGitHubSettings] = useState(false);
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadGitHubPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
+  const githubReady = useRef(false);
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -762,20 +763,24 @@ function RecipeBook() {
             if (typeof ghData.calendar === "object") { localStorage.setItem(CAL_KEY, JSON.stringify(ghData.calendar)); setCalVersion(v=>v+1); }
           }
         }
+        githubReady.current = true;
         setSyncStatus("ok");
         setTimeout(()=>setSyncStatus(""), 2000);
       } catch(e) {
+        githubReady.current = true;
         setSyncStatus("error");
         setTimeout(()=>setSyncStatus(""), 3000);
       }
     }
+    const _prefs = loadGitHubPrefs();
+    if (!_prefs.enabled || !_prefs.token || !_prefs.repo) githubReady.current = true;
     loadFromGH();
   }, []);
 
   // Save to localStorage (always) and GitHub (if enabled) whenever data changes
   useEffect(() => {
     saveData(data);
-    if (githubPrefs.enabled && githubPrefs.token) {
+    if (githubPrefs.enabled && githubPrefs.token && githubReady.current) {
       const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
       const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
       setSyncStatus("syncing");
