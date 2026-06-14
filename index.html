@@ -503,21 +503,17 @@ async function syncToGitHub(prefs, data, pantry, calendar) {
 async function loadFromGitHub(prefs) {
   const { token, repo } = prefs;
   if (!token || !repo) return null;
-  try {
-    const [rFile, pFile, cFile] = await Promise.all([
-      githubGetFile(token, repo, "recipes.json"),
-      githubGetFile(token, repo, "pantry.json"),
-      githubGetFile(token, repo, "calendar.json"),
-    ]);
-    return {
-      recipes: rFile.content,
-      pantry: pFile.content,
-      calendar: cFile.content,
-    };
-  } catch(e) {
-    console.error("GitHub load failed:", e);
-    return null;
-  }
+  const safeGet = async (path) => { try { return await githubGetFile(token, repo, path); } catch(e) { console.warn("GitHub fetch failed for", path, e.message); return { content: null, sha: null }; } };
+  const [rFile, pFile, cFile] = await Promise.all([
+    safeGet("recipes.json"),
+    safeGet("pantry.json"),
+    safeGet("calendar.json"),
+  ]);
+  return {
+    recipes: rFile.content,
+    pantry: pFile.content,
+    calendar: cFile.content,
+  };
 }
 
 // ── GitHub Settings Modal ──────────────────────────────────────────────────
