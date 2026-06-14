@@ -501,9 +501,32 @@ function rowToRecipe(row) {
   };
 }
 
+async function migrateBase64Photo(dataUrl) {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const filename = Date.now() + "-" + Math.random().toString(36).slice(2,9) + ".jpg";
+    const up = await fetch(SUPABASE_URL + "/storage/v1/object/recipe-photos/" + filename, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "image/jpeg" },
+      body: blob
+    });
+    if (up.ok) return SUPABASE_URL + "/storage/v1/object/public/recipe-photos/" + filename;
+  } catch(e) {}
+  return null;
+}
+
 async function syncToSupabase(recipes, pantryItems, calendarData) {
   if (recipes && recipes.length > 0) {
-    await sbUpsert("recipes", recipes.map(recipeToRow));
+    const migratedRecipes = await Promise.all(recipes.map(async r => {
+      if (!r.photos || r.photos.length === 0) return r;
+      const migratedPhotos = await Promise.all(r.photos.map(async p => {
+        if (p && p.startsWith("data:")) { const url = await migrateBase64Photo(p); return url || null; }
+        return p;
+      }));
+      return { ...r, photos: migratedPhotos.filter(Boolean) };
+    }));
+    await sbUpsert("recipes", migratedRecipes.map(recipeToRow));
   }
   if (pantryItems && pantryItems.length > 0) {
     const rows = pantryItems.map(p => ({
