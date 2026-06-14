@@ -760,6 +760,23 @@ function RecipeBook() {
       if (!prefs.enabled) { githubReady.current = true; return; }
       try {
         setSyncStatus("syncing");
+        // First: migrate any base64 photos from localStorage to Supabase Storage
+        try {
+          const localData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
+          const localRecipes = localData.recipes || [];
+          const hasBase64 = localRecipes.some(r => (r.photos||[]).some(p => p && p.startsWith("data:")));
+          if (hasBase64) {
+            const migrated = await Promise.all(localRecipes.map(async r => {
+              if (!r.photos || r.photos.length === 0) return r;
+              const photos = await Promise.all(r.photos.map(async p => {
+                if (p && p.startsWith("data:")) { const url = await migrateBase64Photo(p); return url || p; }
+                return p;
+              }));
+              return { ...r, photos };
+            }));
+            await sbUpsert("recipes", migrated.map(recipeToRow));
+          }
+        } catch(migrateErr) { console.warn("Photo migration failed:", migrateErr); }
         const sbData = await loadFromSupabase();
         if (sbData) {
           if (sbData.recipes && sbData.recipes.length > 0) {
