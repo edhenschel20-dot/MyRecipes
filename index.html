@@ -630,6 +630,34 @@ function GitHubSettingsModal({ onClose, onSaved }) {
             } catch(e) { setStatus("err:" + (e.message||"Unknown error")); }
             setSyncing(false);
           }} disabled={syncing}>{syncing?"Syncing…":"⟳ Sync Now"}</button>
+          <button className="btn btn-outline" onClick={async()=>{
+            setSyncing(true); setStatus("ok:Uploading photos...");
+            try {
+              let recipeData = {};
+              try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
+              const recipes = recipeData.recipes || [];
+              const hasBase64 = recipes.some(r => (r.photos||[]).some(p => p && p.startsWith("data:")));
+              if (!hasBase64) { setStatus("ok:No local photos to migrate."); setSyncing(false); return; }
+              let count = 0;
+              const migrated = await Promise.all(recipes.map(async r => {
+                if (!r.photos || r.photos.length === 0) return r;
+                const photos = await Promise.all(r.photos.map(async p => {
+                  if (p && p.startsWith("data:")) {
+                    const url = await migrateBase64Photo(p);
+                    if (url) { count++; return url; }
+                  }
+                  return p;
+                }));
+                return { ...r, photos: photos.filter(Boolean) };
+              }));
+              await sbUpsert("recipes", migrated.map(recipeToRow));
+              // Update localStorage too
+              recipeData.recipes = migrated;
+              localStorage.setItem("recipebook_v3", JSON.stringify(recipeData));
+              setStatus("ok:✓ Migrated " + count + " photo(s) to cloud!");
+            } catch(e) { setStatus("err:Migration failed: " + e.message); }
+            setSyncing(false);
+          }} disabled={syncing}>📸 Migrate Photos</button>
           <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
