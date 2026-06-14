@@ -863,7 +863,7 @@ function RecipeBook() {
       <div className="app">
         <header className="header">
           <div>
-            <div className="header-title">The <span>Recipe</span> Book</div>
+            <div className="header-title" onClick={()=>{ const n=titleTapCount+1; setTitleTapCount(n); if(n>=5){setShowClaudeCommand(true);setTitleTapCount(0);} setTimeout(()=>setTitleTapCount(0),3000); }}>The <span>Recipe</span> Book</div>
             <div className="header-sub">your kitchen, organized & intelligently guided</div>
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
