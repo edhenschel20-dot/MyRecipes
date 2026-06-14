@@ -582,7 +582,7 @@ async function loadFromSupabase() {
 }
 
 // ── Sync Settings Modal ──────────────────────────────────────────────────────
-function GitHubSettingsModal({ onClose, onSaved }) {
+function GitHubSettingsModal({ onClose, onSaved, recipes }) {
   const [prefs, setPrefs] = React.useState(()=>loadSyncPrefs());
   const [status, setStatus] = React.useState("");
   const [syncing, setSyncing] = React.useState(false);
@@ -633,26 +633,27 @@ function GitHubSettingsModal({ onClose, onSaved }) {
           <button className="btn btn-outline" onClick={async()=>{
             setSyncing(true); setStatus("ok:Uploading photos...");
             try {
-              let recipeData = {};
-              try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
-              const recipes = recipeData.recipes || [];
+              // Use live recipes from app state (localStorage may already be overwritten by Supabase)
+              const liveRecipes = (recipes && recipes.length > 0) ? recipes : (() => {
+                try { return JSON.parse(localStorage.getItem("recipebook_v3")||"{}").recipes || []; } catch{ return []; }
+              })();
+              const recipeData = { recipes: liveRecipes };
+              const hasBase64 = recipes.some(r => (r.photos||[]).some(p => p && p.startsWith("data:")));
+              if (!hasBase64) { setStatus("ok:No local photos to migrate."); setSyncing(false); return; }
               let count = 0;
-              const migrated = await Promise.all(recipes.map(async r => {
-                // Handle both photo (singular) and photos (array)
-                let photoArr = Array.isArray(r.photos) ? r.photos : (r.photo ? [r.photo] : []);
-                if (photoArr.length === 0) return r;
-                const newPhotos = await Promise.all(photoArr.map(async p => {
+              const migrated = await Promise.all(liveRecipes.map(async r => {
+                if (!r.photos || r.photos.length === 0) return r;
+                const photos = await Promise.all(r.photos.map(async p => {
                   if (p && p.startsWith("data:")) {
                     const url = await migrateBase64Photo(p);
                     if (url) { count++; return url; }
-                    return p;
                   }
                   return p;
                 }));
-                return { ...r, photos: newPhotos.filter(Boolean), photo: newPhotos[0]||null };
+                return { ...r, photos: photos.filter(Boolean) };
               }));
-              if (count === 0) { setStatus("ok:No base64 photos found to migrate."); setSyncing(false); return; }
               await sbUpsert("recipes", migrated.map(recipeToRow));
+              // Update localStorage too
               recipeData.recipes = migrated;
               localStorage.setItem("recipebook_v3", JSON.stringify(recipeData));
               setStatus("ok:✓ Migrated " + count + " photo(s) to cloud!");
@@ -995,6 +996,7 @@ function RecipeBook() {
       {showGitHubSettings && <GitHubSettingsModal
         onClose={()=>setShowGitHubSettings(false)}
         onSaved={prefs=>{ setGitHubPrefs(prefs); }}
+        recipes={data.recipes||[]}
       />}
       {lightbox && <Lightbox photos={lightbox.photos||[lightbox.src||lightbox]} startIndex={lightbox.index||0} onClose={()=>setLightbox(null)} />}
     </>
