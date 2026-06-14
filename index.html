@@ -579,31 +579,27 @@ function GitHubSettingsModal({ onClose, onSaved }) {
         {status && <div className={`sync-status ${statusType}`}>{statusMsg}</div>}
         <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
           <button className="btn btn-primary" onClick={save}>Save & Enable</button>
-          {prefs.enabled && (
-            <button className="btn btn-outline" onClick={async()=>{
-              setSyncing(true); setStatus("");
-              try {
-                let recipeData = {};
-                let pantryData = [];
-                let calData = {};
-                try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
-                try { pantryData = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]"); } catch{}
-                try { calData = JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); } catch{}
-                await syncToSupabase(recipeData.recipes||[], pantryData, calData);
-                setStatus("ok:✓ Synced successfully!");
-              } catch(e) { setStatus("err:" + (e.message||"Unknown error")); }
-              setSyncing(false);
-            }} disabled={syncing}>{syncing?"Syncing…":"⟳ Sync Now"}</button>
-          )}
-          {prefs.enabled && <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>}
+          <button className="btn btn-outline" onClick={async()=>{
+            setSyncing(true); setStatus("");
+            try {
+              let recipeData = {};
+              let pantryData = [];
+              let calData = {};
+              try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
+              try { pantryData = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]"); } catch{}
+              try { calData = JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); } catch{}
+              await syncToSupabase(recipeData.recipes||[], pantryData, calData);
+              setStatus("ok:✓ Synced successfully!");
+            } catch(e) { setStatus("err:" + (e.message||"Unknown error")); }
+            setSyncing(false);
+          }} disabled={syncing}>{syncing?"Syncing…":"⟳ Sync Now"}</button>
+          <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
-        {prefs.enabled && (
-          <div style={{marginTop:16,padding:"12px 14px",background:"var(--parchment-dark)",borderRadius:4,fontSize:13}}>
-            <div style={{fontWeight:700,marginBottom:4}}>✓ Sync is active</div>
-            <div style={{color:"var(--ink-light)"}}>Data syncs automatically on every change across all your devices.</div>
-          </div>
-        )}
+        <div style={{marginTop:16,padding:"12px 14px",background:"var(--parchment-dark)",borderRadius:4,fontSize:13}}>
+          <div style={{fontWeight:700,marginBottom:4}}>✓ Sync is active</div>
+          <div style={{color:"var(--ink-light)"}}>Data syncs automatically on every change across all your devices.</div>
+        </div>
       </div>
     </div>
   );
