@@ -606,17 +606,38 @@ function GitHubSettingsModal({ onClose, onSaved }) {
             <button className="btn btn-outline btn-sm" onClick={async()=>{
               setSyncing(true); setStatus("");
               try {
-                // Read from localStorage safely
-                let recipeData = {}; 
+                // Pull from GitHub first, then merge with local
+                let recipeData = {};
                 let pantryData = [];
                 let calData = {};
                 try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
                 try { pantryData = JSON.parse(localStorage.getItem("recipebook_pantry_v1")||"[]"); } catch{}
                 try { calData = JSON.parse(localStorage.getItem("recipebook_calendar_v1")||"{}"); } catch{}
-                // Ensure arrays/objects are correct types
                 if (!Array.isArray(pantryData)) pantryData = [];
                 if (typeof calData !== "object" || Array.isArray(calData)) calData = {};
                 if (typeof recipeData !== "object" || Array.isArray(recipeData)) recipeData = {};
+                // Fetch GitHub versions and merge (GitHub wins for pantry & calendar)
+                try {
+                  const ghData = await loadFromGitHub({token, repo});
+                  if (ghData) {
+                    if (Array.isArray(ghData.pantry) && ghData.pantry.length > 0) {
+                      // Merge: combine GitHub + local, dedupe by id
+                      const ghIds = new Set(ghData.pantry.map(i=>i.id));
+                      const localOnly = pantryData.filter(i=>!ghIds.has(i.id));
+                      pantryData = [...ghData.pantry, ...localOnly];
+                      localStorage.setItem("recipebook_pantry_v1", JSON.stringify(pantryData));
+                    }
+                    if (ghData.calendar && typeof ghData.calendar === "object") {
+                      calData = Object.assign({}, ghData.calendar, calData);
+                      localStorage.setItem("recipebook_calendar_v1", JSON.stringify(calData));
+                    }
+                    if (ghData.recipes && ghData.recipes.recipes) {
+                      const ghRecipeIds = new Set(ghData.recipes.recipes.map(r=>r.id));
+                      const localOnlyRecipes = (recipeData.recipes||[]).filter(r=>!ghRecipeIds.has(r.id));
+                      recipeData = {...recipeData, recipes: [...ghData.recipes.recipes, ...localOnlyRecipes]};
+                    }
+                  }
+                } catch(mergeErr) { console.warn("GitHub merge fetch failed, pushing local:", mergeErr); }
                 await syncToGitHub({token,repo}, recipeData, pantryData, calData);
                 setStatus("ok:✓ Synced successfully!");
               } catch(e) {
