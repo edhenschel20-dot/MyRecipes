@@ -22,5 +22,85 @@
     "quantity": "",
     "notes": "",
     "status": "have"
+  },
+  {
+    "id": "pa0000001",
+    "name": "Apple Smoked Sea Salt (San Francisco Salt Co.)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 jar",
+    "notes": ""
+  },
+  {
+    "id": "pa0000002",
+    "name": "Hottest Hot Salt (Salty Provisions)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 jar",
+    "notes": "Norwegian flaky salt blend"
+  },
+  {
+    "id": "pa0000003",
+    "name": "Morton Coarse Sea Salt",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 container (17.6 oz)",
+    "notes": ""
+  },
+  {
+    "id": "pa0000004",
+    "name": "Himalayan Pink Salt Grinder Refill (Great Value)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 container (12.5 oz)",
+    "notes": ""
+  },
+  {
+    "id": "pa0000005",
+    "name": "Whole Black Pepper (Signature)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 container",
+    "notes": ""
+  },
+  {
+    "id": "pa0000006",
+    "name": "Organic Ground Black Pepper (Member's Mark)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 jar (11 oz)",
+    "notes": "Organic"
+  },
+  {
+    "id": "pa0000007",
+    "name": "Chipotle & Himalayan Pink Salt Seasoning (Dean Jacob's)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 grinder (13.2 oz)",
+    "notes": "Adjustable grinder"
+  },
+  {
+    "id": "pa0000008",
+    "name": "Morton Coarse Kosher Salt",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 container (16 oz)",
+    "notes": ""
+  },
+  {
+    "id": "pa0000009",
+    "name": "Morton Himalayan Pink Salt Fine",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 container (17.6 oz)",
+    "notes": ""
+  },
+  {
+    "id": "pa0000010",
+    "name": "Himalayan Pink Salt Bulk (Member's Mark)",
+    "category": "Spices & Herbs",
+    "status": "have",
+    "quantity": "1 container (38 oz)",
+    "notes": "Large bulk container"
   }
 ]
