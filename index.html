@@ -2483,7 +2483,7 @@ function RecipeModal({recipe,onSave,onClose}) {
             if (!ingredients.length) { alert("Add ingredients first."); return; }
             setAiLoading(true);
             try {
-              const prompt = "Recipe: " + (form.title||"Untitled") + ". Servings: " + (form.servings||4) + ". Ingredients: " + ingredients.join(", ") + ". Return ONLY a JSON object, no markdown, no explanation: {calories:number,protein:number,carbs:number,fat:number,fiber:number,sugar:number,sodium:number,cuisine:string,categories:[string],tags:[string],diets:[string],prepTime:number,cookTime:number}";
+              const prompt = "Recipe: " + (form.title||"Untitled") + ". Servings: " + (form.servings||4) + ". Ingredients: " + ingredients.join(", ") + ". Return ONLY a JSON object, no markdown, no explanation: {calories:number,protein:number,carbs:number,fat:number,fiber:number,sugar:number,sodium:number,cuisine:string,categories:[string],tags:[string],diets:[string],prepTime:number,cookTime:number,description:string}. For categories use only: Appetizer,Breakfast,Brunch,Lunch,Dinner,Dessert,Snack,Side Dish,Sauce,Topping,Dressing,Marinade,Rub,Soup,Salad,Bread,Drink,Other. Description should be one sentence about what makes this dish special.";
               const res = await fetch("https://ejfclvtttwzmxxjnqwcm.supabase.co/functions/v1/claude-sync", {
                 method: "POST",
                 headers: {"Content-Type":"application/json","x-claude-secret":"henschel-claude-2026","Authorization":"Bearer " + SUPABASE_KEY,"apikey":SUPABASE_KEY},
@@ -2503,12 +2503,13 @@ function RecipeModal({recipe,onSave,onClose}) {
               if (ai.fiber) set("fiber", Math.round(ai.fiber));
               if (ai.sugar) set("sugar", Math.round(ai.sugar));
               if (ai.sodium) set("sodium", Math.round(ai.sodium));
-              if (ai.cuisine && !form.cuisine) set("cuisine", ai.cuisine);
-              if (ai.categories && (!form.categories || form.categories.length===0)) set("categories", ai.categories);
-              if (ai.tags) set("tags", Array.isArray(ai.tags)?ai.tags:ai.tags.split(",").map(t=>t.trim()));
-              if (ai.diets && ai.diets.length>0) set("diets", ai.diets);
-              if (ai.prepTime && !form.prepTime) set("prepTime", ai.prepTime);
-              if (ai.cookTime && !form.cookTime) set("cookTime", ai.cookTime);
+              if (ai.cuisine) set("cuisine", ai.cuisine);
+              if (ai.categories && ai.categories.length > 0) set("categories", ai.categories);
+              if (ai.tags && ai.tags.length > 0) set("tags", Array.isArray(ai.tags) ? ai.tags.join(",") : ai.tags);
+              if (ai.diets && ai.diets.length > 0) set("diets", Array.isArray(ai.diets) ? ai.diets : [ai.diets]);
+              if (ai.prepTime) set("prepTime", ai.prepTime);
+              if (ai.cookTime) set("cookTime", ai.cookTime);
+              if (ai.description && !form.description) set("description", ai.description);
             } catch(e) { alert("AI fill failed: " + e.message); }
             setAiLoading(false);
           }} disabled={aiLoading} style={{width:"100%"}}>
