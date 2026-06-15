@@ -619,14 +619,13 @@ function GitHubSettingsModal({ onClose, onSaved, recipes }) {
           <button className="btn btn-outline" onClick={async()=>{
             setSyncing(true); setStatus("");
             try {
-              let recipeData = {};
+              // Sync Now only pushes pantry and calendar - recipes sync individually on save
               let pantryData = [];
               let calData = {};
-              try { recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}"); } catch{}
               try { pantryData = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]"); } catch{}
               try { calData = JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); } catch{}
-              await syncToSupabase(recipeData.recipes||[], pantryData, calData);
-              setStatus("ok:✓ Synced successfully!");
+              await syncToSupabase([], pantryData, calData);
+              setStatus("ok:✓ Pantry & calendar synced!");
             } catch(e) { setStatus("err:" + (e.message||"Unknown error")); }
             setSyncing(false);
           }} disabled={syncing}>{syncing?"Syncing…":"⟳ Sync Now"}</button>
