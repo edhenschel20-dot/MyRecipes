@@ -550,17 +550,19 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
       }
     }
     if (calRows.length > 0) {
-      // Delete existing entries for these date/slot combos then reinsert
-      for (const row of calRows) {
-        await fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${row.date}&slot=eq.${row.slot}`, {
-          method: "DELETE", headers: sbHeaders()
-        });
-      }
-      await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
+      // Calendar upserts on (date, slot) unique constraint
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
         method: "POST",
-        headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+        headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(calRows)
       });
+      // If conflict, delete and reinsert
+      if (!res.ok) {
+        for (const row of calRows) {
+          await fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${row.date}&slot=eq.${row.slot}`, { method: "DELETE", headers: sbHeaders() });
+        }
+        await sbUpsert("calendar", calRows);
+      }
     }
   }
 }
@@ -784,7 +786,6 @@ function RecipeBook() {
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
-  const userChangedData = useRef(false); // true only when user makes a real change
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -2367,6 +2368,7 @@ function ImportTab({onImport}) {
 // ── Recipe Modal (Add / Edit) ──────────────────────────────────────────────
 function RecipeModal({recipe,onSave,onClose}) {
   const blank = {id:uid(),title:"",cuisine:"",categories:[],servings:4,photos:[],prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
+  const [nutritionLoading, setNutritionLoading] = useState(false);
   const [form,setForm] = useState(recipe ? {
     ...recipe,
     tags: Array.isArray(recipe.tags)?recipe.tags.join(", "):recipe.tags||"",
@@ -2972,16 +2974,8 @@ function CalendarTab({ recipes, version }) {
   const [showGoalEdit, setShowGoalEdit] = useState(false);
   const [goalInput, setGoalInput] = useState(String(prefs.dailyGoal||""));
 
-  const calMounted = useRef(false);
   useEffect(()=>{
     saveCalendar(calData);
-    if (!calMounted.current) { calMounted.current = true; return; }
-    const prefs2 = loadSyncPrefs();
-    if (prefs2.enabled) {
-      const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
-      const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
-      syncToSupabase(recipeData.recipes||[], pantry, calData).catch(()=>{});
-    }
   },[calData]);
   useEffect(()=>{ saveCalPrefs(prefs); },[prefs]);
 
@@ -2995,13 +2989,6 @@ function CalendarTab({ recipes, version }) {
       if(Object.keys(day).length===0) delete updated[dk];
       return updated;
     });
-    // Delete from Supabase
-    const prefs2 = loadSyncPrefs();
-    if (prefs2.enabled) {
-      fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${dk}&slot=eq.${slot}`, {
-        method: "DELETE", headers: sbHeaders()
-      }).catch(()=>{});
-    }
   }
   function assignWithLeftovers(dk,slot,recipeId,servings,leftoverSlot,leftoverDays) {
     setCalData(d=>{
