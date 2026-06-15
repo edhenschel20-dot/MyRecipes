@@ -821,7 +821,11 @@ function RecipeBook() {
         const sbData = await loadFromSupabase();
         if (sbData) {
           if (sbData.recipes && sbData.recipes.length > 0) {
-            setData(d => ({...d, recipes: sbData.recipes.map(normalizeRecipe)}));
+            const normalized = sbData.recipes.map(normalizeRecipe);
+            // Write to localStorage immediately so it persists
+            const existing = JSON.parse(localStorage.getItem("recipebook_v3")||"{}" );
+            localStorage.setItem("recipebook_v3", JSON.stringify({...existing, recipes: normalized}));
+            setData(d => ({...d, recipes: normalized}));
           }
           if (Array.isArray(sbData.pantry) && sbData.pantry.length > 0) {
             localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry));
