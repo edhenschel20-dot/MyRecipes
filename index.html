@@ -799,6 +799,8 @@ function RecipeBook() {
   useEffect(() => {
     async function loadFromSB() {
       const prefs = loadSyncPrefs();
+      setSyncStatus("ok:Starting load... enabled=" + prefs.enabled);
+      setTimeout(()=>setSyncStatus(""),4000);
       if (!prefs.enabled) { githubReady.current = true; return; }
       try {
         setSyncStatus("syncing");
