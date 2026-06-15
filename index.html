@@ -2972,8 +2972,16 @@ function CalendarTab({ recipes, version }) {
   const [showGoalEdit, setShowGoalEdit] = useState(false);
   const [goalInput, setGoalInput] = useState(String(prefs.dailyGoal||""));
 
+  const calMounted = useRef(false);
   useEffect(()=>{
     saveCalendar(calData);
+    if (!calMounted.current) { calMounted.current = true; return; }
+    const prefs2 = loadSyncPrefs();
+    if (prefs2.enabled) {
+      const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
+      const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
+      syncToSupabase(recipeData.recipes||[], pantry, calData).catch(()=>{});
+    }
   },[calData]);
   useEffect(()=>{ saveCalPrefs(prefs); },[prefs]);
 
