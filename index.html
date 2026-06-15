@@ -2995,6 +2995,13 @@ function CalendarTab({ recipes, version }) {
       if(Object.keys(day).length===0) delete updated[dk];
       return updated;
     });
+    // Delete from Supabase
+    const prefs2 = loadSyncPrefs();
+    if (prefs2.enabled) {
+      fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${dk}&slot=eq.${slot}`, {
+        method: "DELETE", headers: sbHeaders()
+      }).catch(()=>{});
+    }
   }
   function assignWithLeftovers(dk,slot,recipeId,servings,leftoverSlot,leftoverDays) {
     setCalData(d=>{
