@@ -2506,7 +2506,7 @@ function RecipeModal({recipe,onSave,onClose}) {
               if (ai.cuisine) set("cuisine", ai.cuisine);
               if (ai.categories && ai.categories.length > 0) set("categories", ai.categories);
               if (ai.tags && ai.tags.length > 0) set("tags", Array.isArray(ai.tags) ? ai.tags.join(",") : ai.tags);
-              if (ai.diets && ai.diets.length > 0) { const validDiets = ["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Low-Carb","Nut-Free","Low-Fat","Halal","Kosher"]; const normalized = (Array.isArray(ai.diets)?ai.diets:[ai.diets]).map(d=>validDiets.find(v=>v.toLowerCase()===d.toLowerCase())||d).filter(d=>validDiets.includes(d)); if(normalized.length>0) set("diets", normalized); }
+              if (ai.diets && ai.diets.length > 0) { const validDiets = ["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Low-Carb","Nut-Free","Low-Fat","Halal","Kosher"]; const rawDiets = Array.isArray(ai.diets) ? ai.diets : [ai.diets]; const normalized = rawDiets.map(d => { const s = String(d).trim(); return validDiets.find(v => v.toLowerCase().replace(/-/g,"") === s.toLowerCase().replace(/-/g,"")) || null; }).filter(Boolean); console.log("diets raw:", rawDiets, "normalized:", normalized); if (normalized.length > 0) set("diets", normalized); }
               if (ai.prepTime) set("prepTime", ai.prepTime);
               if (ai.cookTime) set("cookTime", ai.cookTime);
               if (ai.description && !form.description) set("description", ai.description);
