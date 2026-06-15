@@ -786,7 +786,6 @@ function RecipeBook() {
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
-  const userChangedData = useRef(false);
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -831,9 +830,10 @@ function RecipeBook() {
             setCalVersion(v=>v+1);
           }
         }
-        githubReady.current = true;
         setSyncStatus("ok");
         setTimeout(()=>setSyncStatus(""), 2000);
+        // Delay enabling auto-sync so startup setData doesn't trigger a write-back
+        setTimeout(()=>{ githubReady.current = true; }, 1500);
       } catch(e) {
         githubReady.current = true;
         setSyncStatus("error:" + e.message);
@@ -888,18 +888,21 @@ function RecipeBook() {
   }
 
   function upsertRecipe(r) {
+    userChangedData.current = true;
     setData(d => { const e = d.recipes.find(x=>x.id===r.id); return {...d, recipes: e ? d.recipes.map(x=>x.id===r.id?r:x) : [r,...d.recipes]}; });
     // If we're viewing this recipe, refresh it
     if (selectedRecipe?.id === r.id) setSelectedRecipe(r); // no history push on edit save
   }
   function quickPhoto(id, photo, photos) {
     const p = photos || [photo];
+    userChangedData.current = true;
     setData(d=>({...d, recipes:d.recipes.map(r=>r.id===id?{...r,photo:p[0],photos:p}:r)}));
     if(selectedRecipe?.id===id) setSelectedRecipe(r=>({...r,photo:p[0],photos:p}));
   }
 
   async function deleteRecipe(id) {
     if(!window.confirm('Delete this recipe? This cannot be undone.')) return;
+    userChangedData.current = true;
     setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)}));
     if(selectedRecipe?.id===id) setSelectedRecipe(null);
     // Also delete from Supabase
