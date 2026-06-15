@@ -2505,13 +2505,13 @@ Return this exact JSON structure:
   "prepTime": <minutes>,
   "cookTime": <minutes>
 }`;
-              const res = await fetch("https://api.anthropic.com/v1/messages", {
+              const res = await fetch("https://ejfclvtttwzmxxjnqwcm.supabase.co/functions/v1/claude-sync", {
                 method: "POST",
-                headers: {"Content-Type":"application/json"},
-                body: JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,messages:[{role:"user",content:prompt}]})
+                headers: {"Content-Type":"application/json","x-claude-secret":"henschel-claude-2026"},
+                body: JSON.stringify({action:"ai",prompt})
               });
               const data = await res.json();
-              const text = data.content[0].text.trim().replace(/```json|```/g,"").trim();
+              const text = data.data.content[0].text.trim().replace(/```json|```/g,"").trim();
               const ai = JSON.parse(text);
               if (ai.calories) set("calories", Math.round(ai.calories));
               if (ai.protein) set("protein", Math.round(ai.protein));
