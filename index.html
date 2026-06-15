@@ -2483,37 +2483,18 @@ function RecipeModal({recipe,onSave,onClose}) {
             if (!ingredients.length) { alert("Add ingredients first."); return; }
             setAiLoading(true);
             try {
-              const prompt = `You are a nutrition and culinary expert. Analyze this recipe and return ONLY a valid JSON object with no other text.
-
-Recipe: ${form.title||"Untitled"}
-Servings: ${form.servings||4}
-Ingredients: ${ingredients.join(", ")}
-
-Return this exact JSON structure:
-{
-  "calories": <number per serving>,
-  "protein": <grams per serving>,
-  "carbs": <grams per serving>,
-  "fat": <grams per serving>,
-  "fiber": <grams per serving>,
-  "sugar": <grams per serving>,
-  "sodium": <mg per serving>,
-  "cuisine": "<cuisine type e.g. American, Italian, Mexican>",
-  "categories": ["<one of: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Rub, Soup, Salad, Bread, Drink, Other>"],
-  "tags": ["<2-4 relevant tags e.g. beef, quick, grilled>"],
-  "diets": ["<only if applicable: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Low-Carb>"],
-  "prepTime": <minutes>,
-  "cookTime": <minutes>
-}`;
+              const prompt = "Recipe: " + (form.title||"Untitled") + ". Servings: " + (form.servings||4) + ". Ingredients: " + ingredients.join(", ") + ". Return ONLY a JSON object, no markdown, no explanation: {calories:number,protein:number,carbs:number,fat:number,fiber:number,sugar:number,sodium:number,cuisine:string,categories:[string],tags:[string],diets:[string],prepTime:number,cookTime:number}";
               const res = await fetch("https://ejfclvtttwzmxxjnqwcm.supabase.co/functions/v1/claude-sync", {
                 method: "POST",
                 headers: {"Content-Type":"application/json","x-claude-secret":"henschel-claude-2026"},
                 body: JSON.stringify({action:"ai",prompt})
               });
               const data = await res.json();
-              // Handle both direct response and wrapped response
+              console.log("AI response:", JSON.stringify(data).slice(0,500));
               const aiContent = data.data || data;
-              const text = (aiContent.content ? aiContent.content[0].text : aiContent[0]?.text || "").trim().replace(/```json|```/g,"").trim();
+              const rawText = aiContent.content?.[0]?.text || aiContent?.[0]?.text || "";
+              const text = rawText.trim().replace(/```json|```/g,"").trim();
+              if (!text) throw new Error("Empty response from AI: " + JSON.stringify(data).slice(0,200));
               const ai = JSON.parse(text);
               if (ai.calories) set("calories", Math.round(ai.calories));
               if (ai.protein) set("protein", Math.round(ai.protein));
