@@ -2369,6 +2369,7 @@ function ImportTab({onImport}) {
 function RecipeModal({recipe,onSave,onClose}) {
   const blank = {id:uid(),title:"",cuisine:"",categories:[],servings:4,photos:[],prepTime:0,cookTime:0,description:"",tags:"",diets:[],calories:"",protein:"",carbs:"",fat:"",fiber:"",sugar:"",sodium:"",ingredients:"",steps:"",photo:null};
   const [nutritionLoading, setNutritionLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [form,setForm] = useState(recipe ? {
     ...recipe,
     tags: Array.isArray(recipe.tags)?recipe.tags.join(", "):recipe.tags||"",
@@ -2476,6 +2477,61 @@ function RecipeModal({recipe,onSave,onClose}) {
         <div className="checkbox-group">{["Vegetarian","Vegan","Gluten-Free","Dairy-Free","Keto","Paleo","Nut-Free","Low-Carb","Low-Fat","Halal","Kosher"].map(d=><label key={d} className="checkbox-label"><input type="checkbox" checked={form.diets.includes(d)} onChange={()=>toggleDiet(d)} />{d}</label>)}</div>
 
         <div className="form-section">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:"none",letterSpacing:0,color:"var(--ink-light)"}}>per serving (optional)</span></div>
+        <div style={{marginBottom:12}}>
+          <button type="button" className="btn btn-outline" onClick={async()=>{
+            const ingredients = Array.isArray(form.ingredients) ? form.ingredients : (form.ingredients||"").split("\n").filter(Boolean);
+            if (!ingredients.length) { alert("Add ingredients first."); return; }
+            setAiLoading(true);
+            try {
+              const prompt = `You are a nutrition and culinary expert. Analyze this recipe and return ONLY a valid JSON object with no other text.
+
+Recipe: ${form.title||"Untitled"}
+Servings: ${form.servings||4}
+Ingredients: ${ingredients.join(", ")}
+
+Return this exact JSON structure:
+{
+  "calories": <number per serving>,
+  "protein": <grams per serving>,
+  "carbs": <grams per serving>,
+  "fat": <grams per serving>,
+  "fiber": <grams per serving>,
+  "sugar": <grams per serving>,
+  "sodium": <mg per serving>,
+  "cuisine": "<cuisine type e.g. American, Italian, Mexican>",
+  "categories": ["<one of: Appetizer, Breakfast, Brunch, Lunch, Dinner, Dessert, Snack, Side Dish, Sauce, Topping, Dressing, Marinade, Rub, Soup, Salad, Bread, Drink, Other>"],
+  "tags": ["<2-4 relevant tags e.g. beef, quick, grilled>"],
+  "diets": ["<only if applicable: Vegetarian, Vegan, Gluten-Free, Dairy-Free, Keto, Paleo, Low-Carb>"],
+  "prepTime": <minutes>,
+  "cookTime": <minutes>
+}`;
+              const res = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({model:"claude-sonnet-4-6",max_tokens:500,messages:[{role:"user",content:prompt}]})
+              });
+              const data = await res.json();
+              const text = data.content[0].text.trim().replace(/```json|```/g,"").trim();
+              const ai = JSON.parse(text);
+              if (ai.calories) set("calories", Math.round(ai.calories));
+              if (ai.protein) set("protein", Math.round(ai.protein));
+              if (ai.carbs) set("carbs", Math.round(ai.carbs));
+              if (ai.fat) set("fat", Math.round(ai.fat));
+              if (ai.fiber) set("fiber", Math.round(ai.fiber));
+              if (ai.sugar) set("sugar", Math.round(ai.sugar));
+              if (ai.sodium) set("sodium", Math.round(ai.sodium));
+              if (ai.cuisine && !form.cuisine) set("cuisine", ai.cuisine);
+              if (ai.categories && (!form.categories || form.categories.length===0)) set("categories", ai.categories);
+              if (ai.tags) set("tags", Array.isArray(ai.tags)?ai.tags:ai.tags.split(",").map(t=>t.trim()));
+              if (ai.diets && ai.diets.length>0) set("diets", ai.diets);
+              if (ai.prepTime && !form.prepTime) set("prepTime", ai.prepTime);
+              if (ai.cookTime && !form.cookTime) set("cookTime", ai.cookTime);
+            } catch(e) { alert("AI fill failed: " + e.message); }
+            setAiLoading(false);
+          }} disabled={aiLoading} style={{width:"100%"}}>
+            {aiLoading ? "⏳ Analyzing recipe..." : "✨ AI Auto-fill (Nutrition, Cuisine, Tags & More)"}
+          </button>
+        </div>
         <div className="form-row-3">
           <div className="form-group"><label className="form-label">Calories</label><input className="form-input" type="number" value={form.calories} onChange={e=>set("calories",e.target.value)} placeholder="kcal" /></div>
           <div className="form-group"><label className="form-label">Protein (g)</label><input className="form-input" type="number" value={form.protein} onChange={e=>set("protein",e.target.value)} /></div>
