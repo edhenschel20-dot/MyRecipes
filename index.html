@@ -2486,7 +2486,7 @@ function RecipeModal({recipe,onSave,onClose}) {
               const prompt = "Recipe: " + (form.title||"Untitled") + ". Servings: " + (form.servings||4) + ". Ingredients: " + ingredients.join(", ") + ". Return ONLY a JSON object, no markdown, no explanation: {calories:number,protein:number,carbs:number,fat:number,fiber:number,sugar:number,sodium:number,cuisine:string,categories:[string],tags:[string],diets:[string],prepTime:number,cookTime:number}";
               const res = await fetch("https://ejfclvtttwzmxxjnqwcm.supabase.co/functions/v1/claude-sync", {
                 method: "POST",
-                headers: {"Content-Type":"application/json","x-claude-secret":"henschel-claude-2026"},
+                headers: {"Content-Type":"application/json","x-claude-secret":"henschel-claude-2026","Authorization":"Bearer " + SUPABASE_KEY,"apikey":SUPABASE_KEY},
                 body: JSON.stringify({action:"ai",prompt})
               });
               const data = await res.json();
