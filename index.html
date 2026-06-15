@@ -2511,7 +2511,9 @@ Return this exact JSON structure:
                 body: JSON.stringify({action:"ai",prompt})
               });
               const data = await res.json();
-              const text = data.data.content[0].text.trim().replace(/```json|```/g,"").trim();
+              // Handle both direct response and wrapped response
+              const aiContent = data.data || data;
+              const text = (aiContent.content ? aiContent.content[0].text : aiContent[0]?.text || "").trim().replace(/```json|```/g,"").trim();
               const ai = JSON.parse(text);
               if (ai.calories) set("calories", Math.round(ai.calories));
               if (ai.protein) set("protein", Math.round(ai.protein));
