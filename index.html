@@ -823,11 +823,16 @@ function RecipeBook() {
         if (sbData) {
           if (sbData.recipes && sbData.recipes.length > 0) {
             const normalized = sbData.recipes.map(normalizeRecipe);
-            blockSave.current = true;
-            const existing = JSON.parse(localStorage.getItem("recipebook_v3")||"{}" );
-            localStorage.setItem("recipebook_v3", JSON.stringify({...existing, recipes: normalized}));
+            // Write directly to localStorage and reload if data differs
+            const existing = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
+            const existingIds = JSON.stringify((existing.recipes||[]).map(r=>r.id+r.calories+r.cuisine).sort());
+            const newIds = JSON.stringify(normalized.map(r=>r.id+r.calories+r.cuisine).sort());
+            if (existingIds !== newIds) {
+              localStorage.setItem("recipebook_v3", JSON.stringify({...existing, recipes: normalized}));
+              window.location.reload();
+              return;
+            }
             setData(d => ({...d, recipes: normalized}));
-            setTimeout(()=>{ blockSave.current = false; }, 500);
           }
           if (Array.isArray(sbData.pantry) && sbData.pantry.length > 0) {
             localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry));
