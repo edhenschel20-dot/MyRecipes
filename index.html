@@ -668,6 +668,7 @@ function GitHubSettingsModal({ onClose, onSaved, recipes }) {
             } catch(e) { setStatus("err:Migration failed: " + e.message); }
             setSyncing(false);
           }} disabled={syncing}>📸 Migrate Photos</button>
+          <button className="btn btn-ghost" onClick={()=>{ if(window.confirm("This will clear local data and pull fresh from Supabase. Continue?")){ localStorage.removeItem("recipebook_v3"); localStorage.removeItem(PANTRY_KEY); localStorage.removeItem(CAL_KEY); window.location.reload(); } }}>↓ Pull from Cloud</button>
           <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
