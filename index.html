@@ -786,6 +786,7 @@ function RecipeBook() {
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
+  const userChangedData = useRef(false);
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -893,14 +894,12 @@ function RecipeBook() {
   }
   function quickPhoto(id, photo, photos) {
     const p = photos || [photo];
-    userChangedData.current = true;
     setData(d=>({...d, recipes:d.recipes.map(r=>r.id===id?{...r,photo:p[0],photos:p}:r)}));
     if(selectedRecipe?.id===id) setSelectedRecipe(r=>({...r,photo:p[0],photos:p}));
   }
 
   async function deleteRecipe(id) {
     if(!window.confirm('Delete this recipe? This cannot be undone.')) return;
-    userChangedData.current = true;
     setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)}));
     if(selectedRecipe?.id===id) setSelectedRecipe(null);
     // Also delete from Supabase
@@ -983,7 +982,7 @@ function RecipeBook() {
           if (dup) {
             if (!window.confirm(`"${dup.title}" looks similar to "${r.title}". Save anyway?`)) return;
           }
-          userChangedData.current = true; upsertRecipe(r); setTab("library");
+          upsertRecipe(r); setTab("library");
         }} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
         {tab==="import" && <ImportTab onImport={r=>{
@@ -991,7 +990,7 @@ function RecipeBook() {
           if (dup) {
             if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
           }
-          userChangedData.current = true; upsertRecipe(r); setEditRecipe(r); setTab("library");
+          upsertRecipe(r); setEditRecipe(r); setTab("library");
         }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} />}
@@ -1004,7 +1003,7 @@ function RecipeBook() {
               if (!window.confirm(`"${dup.title}" looks similar to "${r.title}". Save anyway?`)) return;
             }
           }
-          userChangedData.current = true; upsertRecipe(r); setShowAdd(false); setEditRecipe(null);
+          upsertRecipe(r); setShowAdd(false); setEditRecipe(null);
         }} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
       {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
       {dinnerCookMode && <CookModeOverlay steps={dinnerCookMode.steps} currentIndex={dinnerCookMode.currentIndex} onNav={dir=>setDinnerCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setDinnerCookMode(null)} isDinner />}
