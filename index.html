@@ -843,17 +843,9 @@ function RecipeBook() {
     loadFromSB();
   }, []);
 
-  // Save to localStorage always; sync to GitHub only after startup load is complete
+  // Save to localStorage on every data change (Supabase sync happens explicitly in upsertRecipe/deleteRecipe)
   useEffect(() => {
     saveData(data);
-    if (githubPrefs.enabled && githubReady.current) {
-      const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
-      const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
-      setSyncStatus("syncing");
-      syncToSupabase(data.recipes||[], pantry, calendar)
-        .then(()=>{ setSyncStatus("ok"); setTimeout(()=>setSyncStatus(""), 2000); })
-        .catch(e=>{ setSyncStatus("error:" + (e.message||"unknown")); setTimeout(()=>setSyncStatus(""), 8000); });
-    }
   }, [data]);
 
   function toggleFavorite(id) {
@@ -887,8 +879,17 @@ function RecipeBook() {
     })());
   }
 
-  function upsertRecipe(r) {
+  async function upsertRecipe(r) {
     setData(d => { const e = d.recipes.find(x=>x.id===r.id); return {...d, recipes: e ? d.recipes.map(x=>x.id===r.id?r:x) : [r,...d.recipes]}; });
+    // Sync this recipe directly to Supabase
+    const prefs = loadSyncPrefs();
+    if (prefs.enabled) {
+      try {
+        setSyncStatus("syncing");
+        await sbUpsert("recipes", [recipeToRow(r)]);
+        setSyncStatus("ok"); setTimeout(()=>setSyncStatus(""), 2000);
+      } catch(e) { setSyncStatus("error:" + e.message); setTimeout(()=>setSyncStatus(""), 5000); }
+    }
     // If we're viewing this recipe, refresh it
     if (selectedRecipe?.id === r.id) setSelectedRecipe(r); // no history push on edit save
   }
