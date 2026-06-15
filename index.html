@@ -2393,9 +2393,9 @@ function RecipeModal({recipe,onSave,onClose}) {
       fiber:form.fiber?+form.fiber:null, sugar:form.sugar?+form.sugar:null, sodium:form.sodium?+form.sodium:null,
       photos: Array.isArray(form.photos) ? form.photos : [],
       photo: Array.isArray(form.photos) && form.photos.length > 0 ? form.photos[0] : null,
-      tags:form.tags.split(",").map(t=>t.trim()).filter(Boolean),
-      ingredients:form.ingredients.split("\n").map(s=>s.trim()).filter(Boolean),
-      steps:form.steps.split("\n").map(s=>s.trim()).filter(Boolean),
+      tags: Array.isArray(form.tags) ? form.tags : (form.tags||"").split(",").map(t=>t.trim()).filter(Boolean),
+      ingredients: Array.isArray(form.ingredients) ? form.ingredients : (form.ingredients||"").split("\n").map(s=>s.trim()).filter(Boolean),
+      steps: Array.isArray(form.steps) ? form.steps : (form.steps||"").split("\n").map(s=>s.trim()).filter(Boolean),
     };
     if(!r.title) return;
     onSave(r);
