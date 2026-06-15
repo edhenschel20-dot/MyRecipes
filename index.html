@@ -897,7 +897,21 @@ function RecipeBook() {
     if(selectedRecipe?.id===id) setSelectedRecipe(r=>({...r,photo:p[0],photos:p}));
   }
 
-  function deleteRecipe(id) { if(!window.confirm('Delete this recipe? This cannot be undone.')) return; setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)})); if(selectedRecipe?.id===id) setSelectedRecipe(null); }
+  async function deleteRecipe(id) {
+    if(!window.confirm('Delete this recipe? This cannot be undone.')) return;
+    setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)}));
+    if(selectedRecipe?.id===id) setSelectedRecipe(null);
+    // Also delete from Supabase
+    const prefs = loadSyncPrefs();
+    if (prefs.enabled) {
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/recipes?id=eq.${id}`, {
+          method: "DELETE",
+          headers: sbHeaders()
+        });
+      } catch(e) { console.warn("Supabase delete failed:", e); }
+    }
+  }
 
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
