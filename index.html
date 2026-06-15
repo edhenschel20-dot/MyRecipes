@@ -786,7 +786,6 @@ function RecipeBook() {
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
-  const userChangedData = useRef(false); // true only when user makes a real change
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -820,7 +819,6 @@ function RecipeBook() {
         const sbData = await loadFromSupabase();
         if (sbData) {
           if (sbData.recipes && sbData.recipes.length > 0) {
-            userChangedData.current = false;
             setData(d => ({...d, recipes: sbData.recipes.map(normalizeRecipe)}));
           }
           if (Array.isArray(sbData.pantry) && sbData.pantry.length > 0) {
@@ -847,7 +845,7 @@ function RecipeBook() {
   // Save to localStorage always; sync to GitHub only after startup load is complete
   useEffect(() => {
     saveData(data);
-    if (githubPrefs.enabled && githubReady.current && userChangedData.current) {
+    if (githubPrefs.enabled && githubReady.current) {
       const pantry = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]");
       const calendar = JSON.parse(localStorage.getItem(CAL_KEY)||"{}");
       setSyncStatus("syncing");
