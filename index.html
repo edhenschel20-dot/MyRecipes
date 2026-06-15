@@ -788,6 +788,7 @@ function RecipeBook() {
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
+  const blockSave = useRef(false);
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
@@ -822,10 +823,11 @@ function RecipeBook() {
         if (sbData) {
           if (sbData.recipes && sbData.recipes.length > 0) {
             const normalized = sbData.recipes.map(normalizeRecipe);
-            // Write to localStorage immediately so it persists
+            blockSave.current = true;
             const existing = JSON.parse(localStorage.getItem("recipebook_v3")||"{}" );
             localStorage.setItem("recipebook_v3", JSON.stringify({...existing, recipes: normalized}));
             setData(d => ({...d, recipes: normalized}));
+            setTimeout(()=>{ blockSave.current = false; }, 500);
           }
           if (Array.isArray(sbData.pantry) && sbData.pantry.length > 0) {
             localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry));
@@ -849,9 +851,9 @@ function RecipeBook() {
     loadFromSB();
   }, []);
 
-  // Save to localStorage on every data change (Supabase sync happens explicitly in upsertRecipe/deleteRecipe)
+  // Save to localStorage on every data change (skip during startup load)
   useEffect(() => {
-    saveData(data);
+    if (!blockSave.current) saveData(data);
   }, [data]);
 
   function toggleFavorite(id) {
