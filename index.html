@@ -670,7 +670,7 @@ function GitHubSettingsModal({ onClose, onSaved, recipes }) {
             } catch(e) { setStatus("err:Migration failed: " + e.message); }
             setSyncing(false);
           }} disabled={syncing}>📸 Migrate Photos</button>
-          <button className="btn btn-ghost" onClick={()=>{ if(window.confirm("This will clear local data and pull fresh from Supabase. Continue?")){ const syncPrefs = localStorage.getItem(SYNC_PREFS_KEY); localStorage.removeItem("recipebook_v3"); localStorage.removeItem(PANTRY_KEY); localStorage.removeItem(CAL_KEY); if(syncPrefs) localStorage.setItem(SYNC_PREFS_KEY, syncPrefs); window.location.reload(); } }}>↓ Pull from Cloud</button>
+          <button className="btn btn-ghost" onClick={async()=>{ setSyncing(true); setStatus("ok:Loading from Supabase..."); try { const sbData = await loadFromSupabase(); if(sbData){ if(sbData.recipes&&sbData.recipes.length>0){ localStorage.setItem("recipebook_v3", JSON.stringify({recipes:sbData.recipes})); } if(sbData.pantry&&sbData.pantry.length>0){ localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry)); } if(sbData.calendar&&Object.keys(sbData.calendar).length>0){ localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar)); } setStatus("ok:✓ Pulled " + (sbData.recipes||[]).length + " recipes from cloud!"); setTimeout(()=>window.location.reload(), 1000); } } catch(e){ setStatus("err:Pull failed: "+e.message); } setSyncing(false); }}>↓ Pull from Cloud</button>
           <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
