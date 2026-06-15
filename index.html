@@ -786,6 +786,7 @@ function RecipeBook() {
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
   const githubReady = useRef(false); // true only after startup GitHub load completes
+  const userChangedData = useRef(false); // true only when user makes a real change
   const [pantryVersion, setPantryVersion] = useState(0);
   const [calVersion, setCalVersion] = useState(0);
   function openLightbox(photo, photos, index) {
