@@ -543,9 +543,12 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
   if (calendarData && typeof calendarData === "object") {
     const calRows = [];
     for (const [date, slots] of Object.entries(calendarData)) {
-      for (const [slot, entry] of Object.entries(slots)) {
-        if (entry && entry.id) {
-          calRows.push({ date, slot, recipe_id: entry.id, servings: entry.servings || 1, leftover: entry.leftover || false, updated_at: new Date().toISOString() });
+      for (const [slot, entries] of Object.entries(slots)) {
+        const arr = Array.isArray(entries) ? entries : (entries && entries.id ? [entries] : []);
+        for (const entry of arr) {
+          if (entry && entry.id) {
+            calRows.push({ date, slot, recipe_id: entry.id, servings: entry.servings || 1, leftover: entry.leftover || false, updated_at: new Date().toISOString() });
+          }
         }
       }
     }
@@ -576,7 +579,8 @@ async function loadFromSupabase() {
   const calendar = {};
   for (const row of calRows) {
     if (!calendar[row.date]) calendar[row.date] = {};
-    calendar[row.date][row.slot] = { id: row.recipe_id, servings: row.servings, leftover: row.leftover };
+    if (!calendar[row.date][row.slot]) calendar[row.date][row.slot] = [];
+    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: row.servings, leftover: row.leftover });
   }
   return { recipes, pantry, calendar };
 }
@@ -2987,11 +2991,15 @@ function getMealCals(entry, recipe) {
 function getDayTotalCals(dayData, recipes) {
   let total = 0; let hasAny = false;
   MEAL_SLOTS.forEach(slot=>{
-    const entry=dayData[slot];
-    if(!entry) return;
-    const recipe=recipes.find(r=>r.id===entry.id);
-    const cals=getMealCals(entry,recipe);
-    if(cals!=null){total+=cals;hasAny=true;}
+    const entries=dayData[slot];
+    if(!entries) return;
+    const arr = Array.isArray(entries) ? entries : [entries];
+    arr.forEach(entry=>{
+      if(!entry) return;
+      const recipe=recipes.find(r=>r.id===entry.id);
+      const cals=getMealCals(entry,recipe);
+      if(cals!=null){total+=cals;hasAny=true;}
+    });
   });
   return hasAny ? total : null;
 }
@@ -3032,8 +3040,27 @@ function CalendarTab({ recipes, version }) {
   },[calData]);
   useEffect(()=>{ saveCalPrefs(prefs); },[prefs]);
 
-  function setMeal(dk,slot,recipeId,servings=1,isLeftover=false) {
-    setCalData(d=>({...d,[dk]:{...(d[dk]||{}),[slot]:recipeId?{id:recipeId,servings,leftover:isLeftover}:null}}));
+  function getSlotArr(d,dk,slot) {
+    const e=d[dk]?.[slot];
+    if(!e) return [];
+    return Array.isArray(e)?e:[e];
+  }
+  function addMeal(dk,slot,recipeId,servings=1,isLeftover=false) {
+    setCalData(d=>{
+      const arr=getSlotArr(d,dk,slot);
+      if(arr.some(e=>e.id===recipeId)) return d; // already there
+      return {...d,[dk]:{...(d[dk]||{}),[slot]:[...arr,{id:recipeId,servings,leftover:isLeftover}]}};
+    });
+  }
+  function removeMeal(dk,slot,recipeId) {
+    setCalData(d=>{
+      const arr=getSlotArr(d,dk,slot).filter(e=>e.id!==recipeId);
+      const day={...(d[dk]||{})};
+      if(arr.length===0) delete day[slot]; else day[slot]=arr;
+      const updated={...d,[dk]:day};
+      if(Object.keys(day).length===0) delete updated[dk];
+      return updated;
+    });
   }
   function clearMeal(dk,slot) {
     setCalData(d=>{
@@ -3045,22 +3072,28 @@ function CalendarTab({ recipes, version }) {
   }
   function assignWithLeftovers(dk,slot,recipeId,servings,leftoverSlot,leftoverDays) {
     setCalData(d=>{
-      let u={...d,[dk]:{...(d[dk]||{}),[slot]:{id:recipeId,servings,leftover:false}}};
+      const arr=getSlotArr(d,dk,slot);
+      let u={...d,[dk]:{...(d[dk]||{}),[slot]:arr.some(e=>e.id===recipeId)?arr:[...arr,{id:recipeId,servings,leftover:false}]}};
       for(let i=1;i<=leftoverDays;i++){
         const lk=addDays(dk,i);
-        u={...u,[lk]:{...(u[lk]||{}),[leftoverSlot]:{id:recipeId,servings,leftover:true}}};
+        const larr=getSlotArr(u,lk,leftoverSlot);
+        u={...u,[lk]:{...(u[lk]||{}),[leftoverSlot]:larr.some(e=>e.id===recipeId)?larr:[...larr,{id:recipeId,servings,leftover:true}]}};
       }
       return u;
     });
   }
-  function updateServings(dk,slot,servings) {
-    setCalData(d=>({...d,[dk]:{...(d[dk]||{}),[slot]:{...(d[dk]?.[slot]||{}),servings}}}));
+  function updateServings(dk,slot,recipeId,servings) {
+    setCalData(d=>{
+      const arr=getSlotArr(d,dk,slot).map(e=>e.id===recipeId?{...e,servings}:e);
+      return {...d,[dk]:{...(d[dk]||{}),[slot]:arr}};
+    });
   }
 
   const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
   const DAY_NAMES=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   const today_key=todayKey();
-  const tonightDinner=calData[today_key]?.dinner;
+  const tonightDinnerArr=Array.isArray(calData[today_key]?.dinner)?calData[today_key].dinner:(calData[today_key]?.dinner?[calData[today_key].dinner]:[]);
+  const tonightDinner=tonightDinnerArr[0]||null;
   const tonightRecipe=tonightDinner?recipes.find(r=>r.id===tonightDinner.id):null;
 
   // Get the week containing today or selected day
@@ -3114,52 +3147,55 @@ function CalendarTab({ recipes, version }) {
         {prefs.trackingEnabled&&<CalorieBar consumed={dayTotalCals||0} goal={prefs.dailyGoal}/>}
         <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
           {MEAL_SLOTS.map(slot=>{
-            const entry=dayData[slot];
-            const recipe=entry?recipes.find(r=>r.id===entry.id):null;
-            const mealCals=getMealCals(entry,recipe);
+            const slotEntries=dayData[slot]?(Array.isArray(dayData[slot])?dayData[slot]:[dayData[slot]]):[];
             return (
-              <div key={slot} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:6,
-                background:"var(--parchment-dark)",border:`2px solid ${entry?SLOT_COLORS[slot]:"transparent"}`}}>
-                <div style={{width:4,height:44,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:SLOT_COLORS[slot],marginBottom:2}}>
-                    {MEAL_LABELS[slot].split(" ")[1]}
+              <div key={slot} style={{borderRadius:6,background:"var(--parchment-dark)",border:`2px solid ${slotEntries.length>0?SLOT_COLORS[slot]:"transparent"}`,overflow:"hidden"}}>
+                {/* Slot header */}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderBottom:slotEntries.length>0?`1px solid ${SLOT_COLORS[slot]}22`:"none"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:4,height:16,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
+                    <span style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:SLOT_COLORS[slot]}}>
+                      {MEAL_LABELS[slot].split(" ")[1]}
+                    </span>
+                    {slotEntries.length===0&&<span style={{fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned</span>}
                   </div>
-                  {entry&&!recipe?(
-                    // Entry exists but recipe not found — show warning with clear option
-                    <div style={{fontSize:13,color:"var(--rust)",fontStyle:"italic"}}>
-                      ⚠ Recipe not found (deleted or not synced)
-                    </div>
-                  ):recipe?(
-                    <div>
-                      <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                        {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 5px",borderRadius:10,marginRight:5,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
-                        {recipe.title}
-                      </div>
-                      {prefs.trackingEnabled&&(
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4,flexWrap:"wrap"}}>
-                          {mealCals!=null&&<span style={{fontSize:12,fontWeight:700,color:"var(--saffron)"}}>🔥 {mealCals} cal</span>}
-                          <div style={{display:"flex",alignItems:"center",gap:4}}>
-                            <span style={{fontSize:11,color:"var(--ink-light)"}}>Servings:</span>
-                            <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
-                              onClick={()=>updateServings(dk,slot,Math.max(0.25,(entry.servings||1)-0.25))}>−</button>
-                            <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:"center"}}>{entry.servings||1}</span>
-                            <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
-                              onClick={()=>updateServings(dk,slot,(entry.servings||1)+0.25)}>+</button>
+                  <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:dk,slot})}>+ Add</button>
+                </div>
+                {/* Each recipe in slot */}
+                {slotEntries.map((entry,ei)=>{
+                  const recipe=entry?recipes.find(r=>r.id===entry.id):null;
+                  const mealCals=getMealCals(entry,recipe);
+                  return (
+                    <div key={entry.id||ei} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderBottom:ei<slotEntries.length-1?`1px solid ${SLOT_COLORS[slot]}22`:"none"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        {!recipe?(
+                          <div style={{fontSize:13,color:"var(--rust)",fontStyle:"italic"}}>⚠ Recipe not found</div>
+                        ):(
+                          <div>
+                            <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                              {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 5px",borderRadius:10,marginRight:5,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
+                              {recipe.title}
+                            </div>
+                            {prefs.trackingEnabled&&(
+                              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4,flexWrap:"wrap"}}>
+                                {mealCals!=null&&<span style={{fontSize:12,fontWeight:700,color:"var(--saffron)"}}>🔥 {mealCals} cal</span>}
+                                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                  <span style={{fontSize:11,color:"var(--ink-light)"}}>Servings:</span>
+                                  <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+                                    onClick={()=>updateServings(dk,slot,entry.id,Math.max(0.25,(entry.servings||1)-0.25))}>−</button>
+                                  <span style={{fontSize:13,fontWeight:700,minWidth:24,textAlign:"center"}}>{entry.servings||1}</span>
+                                  <button style={{width:20,height:20,borderRadius:"50%",border:"1px solid var(--saffron)",background:"none",color:"var(--saffron)",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+                                    onClick={()=>updateServings(dk,slot,entry.id,(entry.servings||1)+0.25)}>+</button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                      <button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px",flexShrink:0}} onClick={()=>removeMeal(dk,slot,entry.id)}>✕</button>
                     </div>
-                  ):(
-                    <div style={{fontSize:13,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned</div>
-                  )}
-                </div>
-                <div style={{display:"flex",gap:6,flexShrink:0}}>
-                  <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:dk,slot})}>
-                    {recipe?"Change":"+ Add"}
-                  </button>
-                  {(recipe||entry)&&<button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>clearMeal(dk,slot)}>✕</button>}
-                </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -3247,7 +3283,7 @@ function CalendarTab({ recipes, version }) {
               const day=i+1;
               const dk=dateKey(viewYear,viewMonth,day);
               const dayData=calData[dk]||{};
-              const meals=MEAL_SLOTS.filter(s=>dayData[s]);
+              const meals=MEAL_SLOTS.filter(s=>{const e=dayData[s];return Array.isArray(e)?e.length>0:!!e;});
               const isToday=dk===today_key;
               const isSelected=dk===selectedDay;
               const dayCals=prefs.trackingEnabled?getDayTotalCals(dayData,recipes):null;
@@ -3266,15 +3302,17 @@ function CalendarTab({ recipes, version }) {
                   {dayCals!=null&&<div style={{textAlign:"center",fontSize:9,fontWeight:700,color:overGoal?"var(--rust)":"var(--sage)",marginBottom:2}}>{dayCals}</div>}
                   <div style={{display:"flex",flexDirection:"column",gap:2}}>
                     {meals.map(slot=>{
-                      const entry=dayData[slot];
-                      const recipe=recipes.find(r=>r.id===entry.id);
-                      return (
-                        <div key={slot} style={{background:SLOT_COLORS[slot],borderRadius:3,padding:"1px 4px",
-                          fontSize:9,color:"white",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
-                          opacity:entry.leftover?0.65:1}}>
-                          {entry.leftover?"↩ ":""}{recipe?recipe.title.slice(0,10)+(recipe.title.length>10?"…":""):"?"}
-                        </div>
-                      );
+                      const slotArr=Array.isArray(dayData[slot])?dayData[slot]:[dayData[slot]];
+                      return slotArr.map((entry,ei)=>{
+                        const recipe=recipes.find(r=>r.id===entry.id);
+                        return (
+                          <div key={slot+ei} style={{background:SLOT_COLORS[slot],borderRadius:3,padding:"1px 4px",
+                            fontSize:9,color:"white",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                            opacity:entry.leftover?0.65:1}}>
+                            {entry.leftover?"↩ ":""}{recipe?recipe.title.slice(0,10)+(recipe.title.length>10?"…":""):"?"}
+                          </div>
+                        );
+                      });
                     })}
                   </div>
                 </div>
@@ -3294,7 +3332,7 @@ function CalendarTab({ recipes, version }) {
               const d=new Date(dk+"T12:00:00");
               const isToday=dk===today_key;
               const isSelected=dk===selectedDay;
-              const hasMeals=MEAL_SLOTS.some(s=>calData[dk]?.[s]);
+              const hasMeals=MEAL_SLOTS.some(s=>{const e=calData[dk]?.[s];return Array.isArray(e)?e.length>0:!!e;});
               return (
                 <div key={dk} onClick={()=>{
                     setSelectedDay(isSelected?null:dk);
@@ -3324,7 +3362,7 @@ function CalendarTab({ recipes, version }) {
               {weekDays.map(dk=>{
                 const d=new Date(dk+"T12:00:00");
                 const isToday=dk===today_key;
-                const meals=MEAL_SLOTS.filter(s=>calData[dk]?.[s]);
+                const meals=MEAL_SLOTS.filter(s=>{const e=calData[dk]?.[s];return Array.isArray(e)?e.length>0:!!e;});
                 return (
                   <div key={dk} style={{background:"var(--cream)",border:`1px solid ${isToday?"var(--ink)":"var(--parchment-dark)"}`,borderRadius:6,overflow:"hidden"}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:isToday?"var(--parchment-dark)":"transparent",cursor:"pointer"}}
@@ -3338,19 +3376,21 @@ function CalendarTab({ recipes, version }) {
                     {meals.length>0?(
                       <div style={{padding:"6px 12px 10px",display:"flex",flexDirection:"column",gap:4}}>
                         {meals.map(slot=>{
-                          const entry=calData[dk][slot];
-                          const recipe=recipes.find(r=>r.id===entry.id);
-                          const cals=getMealCals(entry,recipe);
-                          return (
-                            <div key={slot} style={{display:"flex",alignItems:"center",gap:8}}>
-                              <div style={{width:3,height:16,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
-                              <div style={{fontSize:11,fontWeight:700,color:SLOT_COLORS[slot],width:50,textTransform:"uppercase"}}>{slot}</div>
-                              <div style={{flex:1,fontSize:13,fontWeight:600,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
-                                {entry.leftover&&"↩ "}{recipe?.title||"?"}
+                          const slotArr=Array.isArray(calData[dk][slot])?calData[dk][slot]:[calData[dk][slot]];
+                          return slotArr.map((entry,ei)=>{
+                            const recipe=recipes.find(r=>r.id===entry.id);
+                            const cals=getMealCals(entry,recipe);
+                            return (
+                              <div key={slot+ei} style={{display:"flex",alignItems:"center",gap:8}}>
+                                <div style={{width:3,height:16,borderRadius:2,background:SLOT_COLORS[slot],flexShrink:0}}/>
+                                <div style={{fontSize:11,fontWeight:700,color:SLOT_COLORS[slot],width:50,textTransform:"uppercase"}}>{ei===0?slot:""}</div>
+                                <div style={{flex:1,fontSize:13,fontWeight:600,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
+                                  {entry.leftover&&"↩ "}{recipe?.title||"?"}
+                                </div>
+                                {prefs.trackingEnabled&&cals&&<div style={{fontSize:11,color:"var(--saffron)",fontWeight:700,flexShrink:0}}>{cals} cal</div>}
                               </div>
-                              {prefs.trackingEnabled&&cals&&<div style={{fontSize:11,color:"var(--saffron)",fontWeight:700,flexShrink:0}}>{cals} cal</div>}
-                            </div>
-                          );
+                            );
+                          });
                         })}
                       </div>
                     ):(
@@ -3367,11 +3407,11 @@ function CalendarTab({ recipes, version }) {
       {assignModal&&(
         <AssignMealModal
           dateKey={assignModal.dateKey} slot={assignModal.slot}
-          recipes={recipes} currentId={calData[assignModal.dateKey]?.[assignModal.slot]?.id}
+          recipes={recipes} currentIds={(()=>{const e=calData[assignModal.dateKey]?.[assignModal.slot];return Array.isArray(e)?e.map(x=>x.id):(e?[e.id]:[]);})()}
           trackingEnabled={prefs.trackingEnabled}
           onAssign={(recipeId,servings,leftoverSlot,leftoverDays)=>{
             if(leftoverSlot&&leftoverDays>0) assignWithLeftovers(assignModal.dateKey,assignModal.slot,recipeId,servings,leftoverSlot,leftoverDays);
-            else setMeal(assignModal.dateKey,assignModal.slot,recipeId,servings);
+            else addMeal(assignModal.dateKey,assignModal.slot,recipeId,servings);
             setAssignModal(null);
           }}
           onClose={()=>setAssignModal(null)}
@@ -3382,9 +3422,9 @@ function CalendarTab({ recipes, version }) {
 }
 
 
-function AssignMealModal({ dateKey, slot, recipes, currentId, trackingEnabled, onAssign, onClose }) {
+function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnabled, onAssign, onClose }) {
   const [search,setSearch]=useState("");
-  const [chosen,setChosen]=useState(currentId||null);
+  const [chosen,setChosen]=useState(null);
   const [servings,setServings]=useState(1);
   const [hasLeftovers,setHasLeftovers]=useState(false);
   const [leftoverSlot,setLeftoverSlot]=useState("lunch");
@@ -3459,8 +3499,8 @@ function AssignMealModal({ dateKey, slot, recipes, currentId, trackingEnabled, o
             return (
               <div key={r.id} onClick={()=>setChosen(r.id)}
                 style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:6,cursor:"pointer",
-                  border:`2px solid ${chosen===r.id?"var(--saffron)":"var(--parchment-dark)"}`,
-                  background:chosen===r.id?"rgba(212,137,26,0.08)":"var(--cream)",transition:"all 0.15s"}}>
+                  border:`2px solid ${chosen===r.id?"var(--saffron)":currentIds.includes(r.id)?SLOT_COLORS[slot]||"var(--sage)":"var(--parchment-dark)"}`,
+                  background:chosen===r.id?"rgba(212,137,26,0.08)":currentIds.includes(r.id)?"rgba(90,154,58,0.06)":"var(--cream)",transition:"all 0.15s"}}>
                 {photos[0]
                   ? <img src={photos[0]} style={{width:44,height:44,borderRadius:6,objectFit:"cover",flexShrink:0}} alt=""/>
                   : <div style={{width:44,height:44,borderRadius:6,background:"var(--parchment-dark)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{recipeEmoji(r)}</div>
@@ -3471,7 +3511,7 @@ function AssignMealModal({ dateKey, slot, recipes, currentId, trackingEnabled, o
                     {[r.cuisine,r.prepTime!=null&&((r.prepTime||0)+(r.cookTime||0))+"min",r.calories&&"🔥"+r.calories+"cal"].filter(Boolean).join(" · ")}
                   </div>
                 </div>
-                {chosen===r.id&&<span style={{color:"var(--saffron)",fontSize:20,flexShrink:0}}>✓</span>}
+                {chosen===r.id?<span style={{color:"var(--saffron)",fontSize:20,flexShrink:0}}>✓</span>:currentIds.includes(r.id)?<span style={{color:"var(--sage)",fontSize:14,flexShrink:0}}>✓ added</span>:null}
               </div>
             );
           })}
