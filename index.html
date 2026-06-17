@@ -2765,6 +2765,74 @@ function splitLegacyQuantity(qty) {
   return { count:"", size: str };
 }
 
+// ── Pantry photo-import auto-merge ──────────────────────────────────────
+// Categories where quantity is fungible/continuous (spices, liquids, sauces)
+// get their sizes summed into one running total. Categories where each
+// package is a discrete unit worth tracking separately (proteins, boxed
+// goods, cans) get the count bumped instead, keeping size info readable.
+const PANTRY_ADDITIVE_CATS = ["Spices & Herbs", "Sauces & Condiments", "Drinks", "Baking"];
+
+function isAdditiveCategory(category) {
+  return PANTRY_ADDITIVE_CATS.includes(category);
+}
+
+// Loose match: same normalized name, ignoring case/whitespace/punctuation.
+// Intentionally strict (not fuzzy substring) so "Chicken Breast" doesn't
+// silently merge into "Chicken Broth" -- merging is irreversible enough
+// that a false match is worse than missing one and adding a new row.
+function findExistingPantryMatch(items, name, category) {
+  const norm = s => (s||"").toLowerCase().trim().replace(/[^a-z0-9]+/g," ").trim();
+  const target = norm(name);
+  if (!target) return null;
+  return items.find(i => norm(i.name) === target && (i.category||"Other") === (category||"Other")) || null;
+}
+
+// Parses a leading number + unit from a size string, e.g. "12 oz" -> {num:12, unit:"oz"}.
+// Returns null if it doesn't look like a clean numeric size.
+function parseSizeNumber(size) {
+  const m = (size||"").trim().match(/^([\d.]+)\s*([a-zA-Z]*)$/);
+  if (!m) return null;
+  const num = parseFloat(m[1]);
+  if (isNaN(num)) return null;
+  return { num, unit: (m[2]||"").trim().toLowerCase() };
+}
+
+// Merges a newly-scanned item into an existing pantry item per the rules above.
+// Returns the updated existing item (does not mutate input).
+function mergePantryItem(existing, scanned) {
+  const updated = { ...existing };
+  const newCount = parseInt(scanned.count||"1", 10) || 1;
+  if (isAdditiveCategory(existing.category)) {
+    // Try to sum sizes if both are clean same-unit numbers (e.g. "3.5 oz" + "2 oz").
+    const a = parseSizeNumber(existing.size);
+    const b = parseSizeNumber(scanned.size);
+    if (a && b && a.unit === b.unit) {
+      updated.size = `${(a.num + b.num * newCount).toString().replace(/\.0+$/,"")} ${a.unit}`.trim();
+      updated.count = "1";
+    } else if (!existing.size && scanned.size) {
+      updated.size = scanned.size;
+    }
+    // if units don't match or can't parse, leave size as-is rather than guessing
+  } else {
+    // Discrete categories: bump count, keep a readable size breakdown if sizes differ.
+    const existingCount = parseInt(existing.count||"1", 10) || 1;
+    const totalCount = existingCount + newCount;
+    if (!existing.size || existing.size === scanned.size) {
+      updated.count = String(totalCount);
+      updated.size = scanned.size || existing.size;
+    } else {
+      // sizes differ -- keep a breakdown rather than collapsing into a wrong total
+      const prevSizes = existing._sizeBreakdown || [{ count: existingCount, size: existing.size }];
+      updated._sizeBreakdown = [...prevSizes, { count: newCount, size: scanned.size }];
+      updated.count = String(totalCount);
+      updated.size = updated._sizeBreakdown.map(b=>`${b.count}x ${b.size}`).join(", ");
+    }
+  }
+  // bumping toward "have" since new stock just arrived
+  updated.status = "have";
+  return updated;
+}
+
 // ── Auto-deduct review queue ────────────────────────────────────────────
 // Scans calendar entries dated today or earlier against recipe ingredients,
 // fuzzy-matching against pantry items flagged for auto-deduct (autoDeduct:true,
@@ -3017,6 +3085,7 @@ function PantryTab({ recipes, version }) {
       )}
       {showPhotoImport && (
         <PantryPhotoImport
+          existingItems={items}
           onSave={i=>upsert(i)}
           onClose={()=>setShowPhotoImport(false)}
         />
@@ -3069,7 +3138,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge }) {
   );
 }
 
-function PantryPhotoImport({ onSave, onClose }) {
+function PantryPhotoImport({ existingItems, onSave, onClose }) {
   const [phase, setPhase] = useState("pick"); // pick | scanning | review
   const [identified, setIdentified] = useState([]);
   const [error, setError] = useState("");
@@ -3146,7 +3215,15 @@ function PantryPhotoImport({ onSave, onClose }) {
   }
 
   function confirmSave() {
-    identified.forEach(item => onSave(item));
+    const pantryNow = existingItems || [];
+    identified.forEach(item => {
+      const match = findExistingPantryMatch(pantryNow, item.name, item.category);
+      if (match) {
+        onSave(mergePantryItem(match, item));
+      } else {
+        onSave(item);
+      }
+    });
     onClose();
   }
 
@@ -3181,8 +3258,15 @@ function PantryPhotoImport({ onSave, onClose }) {
         {phase==="review" && (
           <div>
             <p style={{color:"var(--ink-light)",fontSize:13,marginBottom:16}}>Found {identified.length} item{identified.length!==1?"s":""}. Edit anything before saving.</p>
-            {identified.map((item, idx) => (
+            {identified.map((item, idx) => {
+              const match = findExistingPantryMatch(existingItems||[], item.name, item.category);
+              return (
               <div key={item.id} style={{background:"white",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 14px",marginBottom:10}}>
+                {match && (
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--saffron)",marginBottom:6}}>
+                    🔗 Will merge into existing "{match.name}" ({pantryDisplayAmount(match)})
+                  </div>
+                )}
                 <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
                   <input
                     style={{flex:1,border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 10px",fontSize:14,fontWeight:600,background:"var(--cream)"}}
@@ -3222,7 +3306,8 @@ function PantryPhotoImport({ onSave, onClose }) {
                   </select>
                 </div>
               </div>
-            ))}
+              );
+            })}
             {identified.length===0 && (
               <div style={{textAlign:"center",padding:"20px 0",color:"var(--ink-light)"}}>All items removed.</div>
             )}
