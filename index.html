@@ -535,6 +535,8 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
       category: p.category || "Other",
       status: p.status || "have",
       quantity: p.quantity || "",
+      size: p.size || "",
+      count: p.count || "",
       notes: p.notes || "",
       auto_deduct: !!p.autoDeduct,
       updated_at: new Date().toISOString()
@@ -2733,6 +2735,36 @@ function savePantry(items) {
 }
 function pantryUid() { return "p"+Math.random().toString(36).slice(2,9); }
 
+// ── Pantry size/count helpers ───────────────────────────────────────────
+// Items are stored with separate `size` (e.g. "12 oz", "3 lb") and `count`
+// (e.g. "2", "4") fields rather than one combined quantity string, so the
+// pantry shows precise amounts ("3 lb" vs a vague "1x").
+
+function pantryDisplayAmount(item) {
+  const size = (item.size||"").trim();
+  const count = (item.count||"").trim();
+  if (size && count) return `${count} × ${size}`;
+  if (size) return size;
+  if (count) return `${count}`;
+  // fall back to legacy combined quantity field if size/count were never set
+  return (item.quantity||"").trim();
+}
+
+// Best-effort one-time split of an old free-text quantity string into
+// {count, size}. Used only when migrating items that predate the split.
+function splitLegacyQuantity(qty) {
+  if (!qty) return { count:"", size:"" };
+  const str = qty.trim();
+  // "COUNTx SIZE" or "COUNT x SIZE" (new prompt format)
+  let m = str.match(/^(\d+)\s*x\s*(.+)$/i);
+  if (m) return { count: m[1], size: m[2].trim() };
+  // "COUNT boxes/jars/bottles/cans/bags ..." -> treat the unit word as size, number as count
+  m = str.match(/^(\d+)\s+(.+)$/);
+  if (m) return { count: m[1], size: m[2].trim() };
+  // no leading number found — put it all in size, leave count blank
+  return { count:"", size: str };
+}
+
 // ── Auto-deduct review queue ────────────────────────────────────────────
 // Scans calendar entries dated today or earlier against recipe ingredients,
 // fuzzy-matching against pantry items flagged for auto-deduct (autoDeduct:true,
@@ -2956,7 +2988,7 @@ function PantryTab({ recipes, version }) {
                           <div key={item.id} style={{display:"flex",alignItems:"center",padding:"10px 16px",borderTop:"1px solid var(--parchment-dark)",gap:10}}>
                             <div style={{flex:1}}>
                               <div style={{fontWeight:600,fontSize:14,marginBottom:2}}>{item.name}</div>
-                              {item.quantity&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{item.quantity}</div>}
+                              {pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>}
                               {item.notes&&<div style={{fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>{item.notes}</div>}
                             </div>
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -3026,7 +3058,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge }) {
             <div key={item.id} style={{display:"flex",alignItems:"center",padding:"10px 0",borderBottom:"1px dashed var(--parchment-dark)",gap:10}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:600,fontSize:15}}>{item.name}</div>
-                {item.quantity&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{item.quantity}</div>}
+                {pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>}
               </div>
               <div onClick={()=>onCycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
             </div>
@@ -3063,7 +3095,7 @@ function PantryPhotoImport({ onSave, onClose }) {
         type: "image",
         source: { type: "base64", media_type: f.type||"image/jpeg", data: await fileToBase64(f) }
       })));
-      const prompt = "You are a pantry inventory assistant. Look at these photos of pantry items. For every distinct product you can identify, return a JSON array (no markdown, no extra text) where each item has: name (short generic product name only, with brand names and store names stripped out -- for example 'Jewel Osco Pork Top Loin Chop' becomes 'Pork Top Loin Chop', 'Signature Select Breakfast Sausage Links' becomes 'Breakfast Sausage Links', 'Meijer 80% Lean Ground Beef' becomes '80% Lean Ground Beef'), category (one of: Proteins, Produce, Dairy, Grains & Pasta, Canned & Jarred, Spices & Herbs, Sauces & Condiments, Baking, Drinks, Snacks, Other), quantity (format strictly as 'COUNTx SIZE' where COUNT is how many packages and SIZE is the weight, volume, or count per package, e.g. '2x 12 oz', '1x 1.89 lb', '3x 16 oz can' -- always include the count even if it is 1, and if size truly cannot be determined just use the count like '2x'), status (have), notes (empty string). Example: [{\"name\":\"Olive Oil\",\"category\":\"Sauces & Condiments\",\"quantity\":\"1x 16.9 fl oz\",\"status\":\"have\",\"notes\":\"\"}]";
+      const prompt = "You are a pantry inventory assistant. Look at these photos of pantry items. For every distinct product you can identify, return a JSON array (no markdown, no extra text) where each item has: name (short generic product name only, with brand names and store names stripped out -- for example 'Jewel Osco Pork Top Loin Chop' becomes 'Pork Top Loin Chop', 'Signature Select Breakfast Sausage Links' becomes 'Breakfast Sausage Links', 'Meijer 80% Lean Ground Beef' becomes '80% Lean Ground Beef'), category (one of: Proteins, Produce, Dairy, Grains & Pasta, Canned & Jarred, Spices & Herbs, Sauces & Condiments, Baking, Drinks, Snacks, Other), count (how many packages/units visible, as a plain number string like '1' or '2' -- always include this even if it is 1), size (the weight, volume, or size per package as a string, e.g. '12 oz', '1.89 lb', '16.9 fl oz', '1 jar' -- leave as empty string only if truly indeterminable), status (have), notes (empty string). Example: [{\"name\":\"Olive Oil\",\"category\":\"Sauces & Condiments\",\"count\":\"1\",\"size\":\"16.9 fl oz\",\"status\":\"have\",\"notes\":\"\"}]";
       const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
         method: "POST",
         headers: {
@@ -3168,10 +3200,16 @@ function PantryPhotoImport({ onSave, onClose }) {
                     {PANTRY_CATS.map(c=><option key={c}>{c}</option>)}
                   </select>
                   <input
+                    style={{flex:"0 1 70px",border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 10px",fontSize:12,background:"var(--cream)"}}
+                    placeholder="Count"
+                    value={item.count||""}
+                    onChange={e=>updateItem(idx,"count",e.target.value)}
+                  />
+                  <input
                     style={{flex:1,minWidth:100,border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 10px",fontSize:12,background:"var(--cream)"}}
-                    placeholder="Qty (e.g. 1 jar)"
-                    value={item.quantity||""}
-                    onChange={e=>updateItem(idx,"quantity",e.target.value)}
+                    placeholder="Size (e.g. 12 oz, 3 lb)"
+                    value={item.size||""}
+                    onChange={e=>updateItem(idx,"size",e.target.value)}
                   />
                   <select
                     style={{border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 8px",fontSize:12,background:"var(--cream)"}}
@@ -3202,8 +3240,16 @@ function PantryPhotoImport({ onSave, onClose }) {
 }
 
 function PantryItemModal({ item, onSave, onClose }) {
-  const blank = { id:pantryUid(), name:"", category:"Other", quantity:"", notes:"", status:"have", autoDeduct:false };
-  const [form, setForm] = useState(item?{autoDeduct:false,...item}:blank);
+  const blank = { id:pantryUid(), name:"", category:"Other", size:"", count:"", quantity:"", notes:"", status:"have", autoDeduct:false };
+  const [form, setForm] = useState(()=>{
+    if (!item) return blank;
+    // Migrate legacy combined `quantity` into size/count the first time this item is edited.
+    if ((!item.size && !item.count) && item.quantity) {
+      const split = splitLegacyQuantity(item.quantity);
+      return { autoDeduct:false, ...item, size: split.size, count: split.count };
+    }
+    return { autoDeduct:false, size:"", count:"", ...item };
+  });
   function set(k,v) { setForm(f=>({...f,[k]:v})); }
   function save() { if(!form.name.trim()) return; onSave(form); }
   const isSpice = form.category === "Spices & Herbs";
@@ -3232,9 +3278,15 @@ function PantryItemModal({ item, onSave, onClose }) {
             </select>
           </div>
         </div>
-        <div className="form-group">
-          <label className="form-label">Quantity (optional)</label>
-          <input className="form-input" value={form.quantity} onChange={e=>set("quantity",e.target.value)} placeholder="e.g. 1 bag, half full, 2 cans" />
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Count (optional)</label>
+            <input className="form-input" value={form.count} onChange={e=>set("count",e.target.value)} placeholder="e.g. 2" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Size (optional)</label>
+            <input className="form-input" value={form.size} onChange={e=>set("size",e.target.value)} placeholder="e.g. 3 lb, 12 oz, 1 jar" />
+          </div>
         </div>
         <div className="form-group">
           <label className="form-label">Notes (optional)</label>
