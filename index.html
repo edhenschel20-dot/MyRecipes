@@ -542,7 +542,9 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
   }
   if (calendarData && typeof calendarData === "object") {
     const calRows = [];
+    const datesTouched = new Set();
     for (const [date, slots] of Object.entries(calendarData)) {
+      datesTouched.add(date);
       for (const [slot, entries] of Object.entries(slots)) {
         const arr = Array.isArray(entries) ? entries : (entries && entries.id ? [entries] : []);
         for (const entry of arr) {
@@ -552,19 +554,21 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
         }
       }
     }
+    // Calendar supports multiple recipes per date+slot, so we replace per-date:
+    // delete all existing rows for each touched date, then insert the current set.
+    // This also correctly removes meals that were deleted in the app.
+    for (const date of datesTouched) {
+      await fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${date}`, { method: "DELETE", headers: sbHeaders() });
+    }
     if (calRows.length > 0) {
-      // Calendar upserts on (date, slot) unique constraint
       const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
         method: "POST",
-        headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
+        headers: { ...sbHeaders(), "Prefer": "return=minimal" },
         body: JSON.stringify(calRows)
       });
-      // If conflict, delete and reinsert
       if (!res.ok) {
-        for (const row of calRows) {
-          await fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${row.date}&slot=eq.${row.slot}`, { method: "DELETE", headers: sbHeaders() });
-        }
-        await sbUpsert("calendar", calRows);
+        const t = await res.text();
+        throw new Error(`Calendar sync failed: ${res.status} ${t.slice(0,150)}`);
       }
     }
   }
