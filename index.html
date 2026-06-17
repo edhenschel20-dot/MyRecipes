@@ -2956,7 +2956,7 @@ function PantryPhotoImport({ onSave, onClose }) {
         body: JSON.stringify({
           action: "ai",
           content: [...imageContents, { type: "text", text: prompt }],
-          max_tokens: 1000
+          max_tokens: 4000
         })
       });
       const wrapper = await response.json();
@@ -2964,7 +2964,20 @@ function PantryPhotoImport({ onSave, onClose }) {
       const data = wrapper.data;
       const text = (data.content||[]).map(b=>b.text||"").join("");
       const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
+      let parsed;
+      try {
+        parsed = JSON.parse(clean);
+      } catch(parseErr) {
+        // Response may have been truncated mid-item. Salvage complete
+        // {...} objects from the array rather than failing the whole scan.
+        const matches = clean.match(/\{[^{}]*\}/g) || [];
+        const salvaged = [];
+        for (const m of matches) {
+          try { salvaged.push(JSON.parse(m)); } catch {}
+        }
+        if (salvaged.length === 0) throw parseErr;
+        parsed = salvaged;
+      }
       setIdentified(parsed.map(item => ({ ...item, id: pantryUid() })));
       setPhase("review");
     } catch(err) {
