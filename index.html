@@ -536,6 +536,7 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
       status: p.status || "have",
       quantity: p.quantity || "",
       notes: p.notes || "",
+      auto_deduct: !!p.autoDeduct,
       updated_at: new Date().toISOString()
     }));
     await sbUpsert("pantry", rows);
@@ -579,7 +580,7 @@ async function loadFromSupabase() {
     sbGet("recipes"), sbGet("pantry"), sbGet("calendar")
   ]);
   const recipes = recipeRows.map(rowToRecipe);
-  const pantry = pantryRows;
+  const pantry = pantryRows.map(p => ({ ...p, autoDeduct: !!p.auto_deduct }));
   const calendar = {};
   for (const row of calRows) {
     if (!calendar[row.date]) calendar[row.date] = {};
@@ -2732,6 +2733,75 @@ function savePantry(items) {
 }
 function pantryUid() { return "p"+Math.random().toString(36).slice(2,9); }
 
+// ── Auto-deduct review queue ────────────────────────────────────────────
+// Scans calendar entries dated today or earlier against recipe ingredients,
+// fuzzy-matching against pantry items flagged for auto-deduct (autoDeduct:true,
+// never Spices & Herbs). Matches are queued for manual review, never changed
+// automatically.
+
+function loadPantryReview() {
+  try { const r=localStorage.getItem(PANTRY_REVIEW_KEY); if(r) return JSON.parse(r); } catch {}
+  return [];
+}
+function savePantryReview(list) {
+  try { localStorage.setItem(PANTRY_REVIEW_KEY, JSON.stringify(list)); } catch {}
+}
+function loadReviewSeenKeys() {
+  try { const r=localStorage.getItem(PANTRY_REVIEW_SEEN_KEY); if(r) return JSON.parse(r); } catch {}
+  return [];
+}
+function saveReviewSeenKeys(keys) {
+  try { localStorage.setItem(PANTRY_REVIEW_SEEN_KEY, JSON.stringify(keys)); } catch {}
+}
+
+function normalizeWords(str) {
+  return (str||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(w=>w.length>2);
+}
+
+// Returns true if a pantry item name plausibly appears in an ingredient string.
+function fuzzyIngredientMatch(ingredientStr, pantryName) {
+  const ingWords = new Set(normalizeWords(ingredientStr));
+  const nameWords = normalizeWords(pantryName);
+  if (nameWords.length === 0) return false;
+  const hits = nameWords.filter(w=>ingWords.has(w)).length;
+  // require majority of the pantry item's significant words to appear in the ingredient line
+  return hits / nameWords.length >= 0.6;
+}
+
+// Scans calendar for date<=today, matches recipe ingredients against
+// auto-deduct-eligible pantry items, returns array of review entries.
+// Each review entry: { key, date, slot, recipeId, recipeName, matches:[{pantryId,pantryName,ingredient}] }
+function scanForAutoDeductMatches(calendar, recipes, pantryItems) {
+  const today = todayKey();
+  const eligible = pantryItems.filter(p => p.autoDeduct && p.category !== "Spices & Herbs");
+  if (eligible.length === 0) return [];
+  const results = [];
+  for (const [date, slots] of Object.entries(calendar||{})) {
+    if (date > today) continue; // only today or past
+    for (const [slot, entries] of Object.entries(slots||{})) {
+      const arr = Array.isArray(entries) ? entries : (entries && entries.id ? [entries] : []);
+      for (const entry of arr) {
+        if (!entry || !entry.id) continue;
+        const recipe = recipes.find(r=>r.id===entry.id);
+        if (!recipe || !recipe.ingredients) continue;
+        const key = `${date}|${slot}|${entry.id}`;
+        const matches = [];
+        for (const ing of recipe.ingredients) {
+          for (const p of eligible) {
+            if (fuzzyIngredientMatch(ing, p.name)) {
+              matches.push({ pantryId: p.id, pantryName: p.name, ingredient: ing });
+            }
+          }
+        }
+        if (matches.length > 0) {
+          results.push({ key, date, slot, recipeId: entry.id, recipeName: recipe.title||recipe.name||"Recipe", matches });
+        }
+      }
+    }
+  }
+  return results;
+}
+
 function PantryTab({ recipes, version }) {
   const [items, setItems] = useState(()=>loadPantry());
   useEffect(()=>{ if(version>0) setItems(loadPantry()); },[version]);
@@ -2742,6 +2812,27 @@ function PantryTab({ recipes, version }) {
   const [editItem, setEditItem] = useState(null);
   const [expandedCats, setExpandedCats] = useState({});
   const [showPhotoImport, setShowPhotoImport] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState([]);
+  const [showReview, setShowReview] = useState(false);
+
+  // Re-scan for auto-deduct matches every time the Pantry tab mounts/loads.
+  useEffect(()=>{
+    try {
+      const calendar = loadCalendar();
+      const recipeData = JSON.parse(localStorage.getItem("recipebook_v3")||"{}");
+      const allRecipes = recipeData.recipes||recipes||[];
+      const found = scanForAutoDeductMatches(calendar, allRecipes, items);
+      const seenKeys = new Set(loadReviewSeenKeys());
+      const fresh = found.filter(f=>!seenKeys.has(f.key));
+      setReviewQueue(fresh);
+    } catch {}
+  }, [items]);
+
+  function dismissReviewItem(key) {
+    const seen = loadReviewSeenKeys();
+    saveReviewSeenKeys([...seen, key]);
+    setReviewQueue(prev=>prev.filter(r=>r.key!==key));
+  }
 
   const pantryMounted = useRef(false);
   useEffect(()=>{ 
@@ -2805,6 +2896,23 @@ function PantryTab({ recipes, version }) {
           <button className="btn btn-outline btn-sm" onClick={()=>setShowPhotoImport(true)}>📷 Photo Import</button>
         </div>
       </div>
+
+      {reviewQueue.length > 0 && (
+        <div
+          onClick={()=>setShowReview(true)}
+          style={{
+            display:"flex",alignItems:"center",gap:10,cursor:"pointer",
+            background:"#fff4d6",border:"1px solid var(--saffron)",borderRadius:6,
+            padding:"10px 16px",marginBottom:16
+          }}
+        >
+          <span style={{fontSize:18}}>🔔</span>
+          <span style={{fontSize:13,fontWeight:600,flex:1}}>
+            {reviewQueue.length} item{reviewQueue.length!==1?"s":""} to review for pantry use
+          </span>
+          <span style={{fontSize:13,color:"var(--saffron)",fontWeight:700}}>Review →</span>
+        </div>
+      )}
 
       {view==="shopping" ? (
         <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} />
@@ -2879,6 +2987,17 @@ function PantryTab({ recipes, version }) {
         <PantryPhotoImport
           onSave={i=>upsert(i)}
           onClose={()=>setShowPhotoImport(false)}
+        />
+      )}
+      {showReview && (
+        <PantryReviewModal
+          queue={reviewQueue}
+          items={items}
+          onMark={(pantryId, status)=>{
+            setItems(prev=>prev.map(x=>x.id===pantryId?{...x,status}:x));
+          }}
+          onDismiss={dismissReviewItem}
+          onClose={()=>setShowReview(false)}
         />
       )}
     </div>
@@ -3083,10 +3202,11 @@ function PantryPhotoImport({ onSave, onClose }) {
 }
 
 function PantryItemModal({ item, onSave, onClose }) {
-  const blank = { id:pantryUid(), name:"", category:"Other", quantity:"", notes:"", status:"have" };
-  const [form, setForm] = useState(item||blank);
+  const blank = { id:pantryUid(), name:"", category:"Other", quantity:"", notes:"", status:"have", autoDeduct:false };
+  const [form, setForm] = useState(item?{autoDeduct:false,...item}:blank);
   function set(k,v) { setForm(f=>({...f,[k]:v})); }
   function save() { if(!form.name.trim()) return; onSave(form); }
+  const isSpice = form.category === "Spices & Herbs";
 
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -3120,9 +3240,69 @@ function PantryItemModal({ item, onSave, onClose }) {
           <label className="form-label">Notes (optional)</label>
           <input className="form-input" value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="e.g. Whole Foods brand, organic" />
         </div>
+        {!isSpice && (
+          <div className="form-group" style={{display:"flex",alignItems:"center",gap:8}}>
+            <input type="checkbox" id="autoDeductChk" checked={!!form.autoDeduct} onChange={e=>set("autoDeduct",e.target.checked)} style={{width:18,height:18}} />
+            <label htmlFor="autoDeductChk" className="form-label" style={{margin:0,cursor:"pointer"}}>Flag for review when used in a cooked meal</label>
+          </div>
+        )}
         <div className="flex gap-8 mt-16">
           <button className="btn btn-primary" onClick={save}>Save</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PantryReviewModal({ queue, items, onMark, onDismiss, onClose }) {
+  function itemById(id) { return items.find(x=>x.id===id); }
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:520,maxHeight:"85vh",overflowY:"auto"}}>
+        <div className="modal-title">🔔 Review Pantry Usage</div>
+        <p style={{fontSize:13,color:"var(--ink-light)",marginBottom:16}}>
+          These meals were cooked (date is today or earlier) and may have used pantry items you've flagged for tracking. Mark status or dismiss if not applicable — nothing changes until you choose.
+        </p>
+
+        {queue.length===0 ? (
+          <div style={{textAlign:"center",padding:"20px 0",color:"var(--ink-light)"}}>All caught up — nothing left to review.</div>
+        ) : queue.map(entry=>(
+          <div key={entry.key} style={{background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 14px",marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:2}}>{entry.recipeName}</div>
+            <div style={{fontSize:12,color:"var(--ink-light)",marginBottom:10}}>{entry.date} · {MEAL_LABELS[entry.slot]||entry.slot}</div>
+            {entry.matches.map((m,idx)=>{
+              const pantryItem = itemById(m.pantryId);
+              return (
+                <div key={idx} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderTop: idx>0?"1px solid var(--parchment-dark)":"none",flexWrap:"wrap"}}>
+                  <div style={{flex:1,minWidth:140}}>
+                    <div style={{fontSize:13,fontWeight:600}}>{m.pantryName}</div>
+                    <div style={{fontSize:11,color:"var(--ink-light)",fontStyle:"italic"}}>matched: "{m.ingredient}"</div>
+                    {pantryItem && <div style={{fontSize:11,color:"var(--ink-light)"}}>currently: {STATUS_LABELS[pantryItem.status]||pantryItem.status}</div>}
+                  </div>
+                  <select
+                    className="form-input"
+                    style={{width:"auto",fontSize:12,padding:"4px 8px"}}
+                    defaultValue=""
+                    onChange={e=>{ if(e.target.value) onMark(m.pantryId, e.target.value); }}
+                  >
+                    <option value="" disabled>Set status…</option>
+                    <option value="have">✓ Still have it</option>
+                    <option value="low">⚠ Running low</option>
+                    <option value="out">✕ Out / Need</option>
+                  </select>
+                </div>
+              );
+            })}
+            <div style={{marginTop:8,textAlign:"right"}}>
+              <button className="btn btn-ghost btn-sm" onClick={()=>onDismiss(entry.key)}>Dismiss</button>
+            </div>
+          </div>
+        ))}
+
+        <div className="flex gap-8 mt-16">
+          <button className="btn btn-primary" onClick={onClose}>Done</button>
         </div>
       </div>
     </div>
@@ -3134,6 +3314,8 @@ function PantryItemModal({ item, onSave, onClose }) {
 // ── Meal Calendar ─────────────────────────────────────────────────────────
 const CAL_KEY = "recipebook_calendar_v1";
 const CAL_PREFS_KEY = "recipebook_cal_prefs_v1";
+const PANTRY_REVIEW_KEY = "recipebook_pantry_review_v1";
+const PANTRY_REVIEW_SEEN_KEY = "recipebook_pantry_review_seen_v1";
 const MEAL_SLOTS = ["breakfast","lunch","dinner","snack"];
 const MEAL_LABELS = { breakfast:"🌅 Breakfast", lunch:"☀️ Lunch", dinner:"🌙 Dinner", snack:"🍎 Snack" };
 const SLOT_COLORS = { breakfast:"#e8a020", lunch:"#5a9a3a", dinner:"#4a6aaa", snack:"#aa4a8a" };
