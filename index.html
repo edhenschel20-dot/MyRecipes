@@ -3258,12 +3258,17 @@ function PantryItemModal({ item, onSave, onClose }) {
 function PantryReviewModal({ queue, items, onMark, onDismiss, onClose }) {
   function itemById(id) { return items.find(x=>x.id===id); }
 
+  function markAndDismiss(entryKey, pantryId, status) {
+    onMark(pantryId, status);
+    onDismiss(entryKey);
+  }
+
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="modal" style={{maxWidth:520,maxHeight:"85vh",overflowY:"auto"}}>
         <div className="modal-title">🔔 Review Pantry Usage</div>
         <p style={{fontSize:13,color:"var(--ink-light)",marginBottom:16}}>
-          These meals were cooked (date is today or earlier) and may have used pantry items you've flagged for tracking. Mark status or dismiss if not applicable — nothing changes until you choose.
+          These meals were cooked (date is today or earlier) and may have used pantry items you've flagged for tracking. Mark status or dismiss if not applicable — nothing changes until you choose, and once you act on a meal it won't be asked about again.
         </p>
 
         {queue.length===0 ? (
@@ -3285,7 +3290,7 @@ function PantryReviewModal({ queue, items, onMark, onDismiss, onClose }) {
                     className="form-input"
                     style={{width:"auto",fontSize:12,padding:"4px 8px"}}
                     defaultValue=""
-                    onChange={e=>{ if(e.target.value) onMark(m.pantryId, e.target.value); }}
+                    onChange={e=>{ if(e.target.value) markAndDismiss(entry.key, m.pantryId, e.target.value); }}
                   >
                     <option value="" disabled>Set status…</option>
                     <option value="have">✓ Still have it</option>
