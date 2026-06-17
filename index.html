@@ -2941,16 +2941,23 @@ function PantryPhotoImport({ onSave, onClose }) {
         source: { type: "base64", media_type: f.type||"image/jpeg", data: await fileToBase64(f) }
       })));
       const prompt = "You are a pantry inventory assistant. Look at these photos of pantry items. For every distinct product you can identify, return a JSON array (no markdown, no extra text) where each item has: name (short product name), category (one of: Proteins, Produce, Dairy, Grains & Pasta, Canned & Jarred, Spices & Herbs, Sauces & Condiments, Baking, Drinks, Snacks, Other), quantity (visible amount or package size as a string, or empty string if unknown), status (have), notes (empty string). Example: [{\"name\":\"Olive Oil\",\"category\":\"Sauces & Condiments\",\"quantity\":\"1 bottle\",\"status\":\"have\",\"notes\":\"\"}]";
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "x-claude-secret": "henschel-claude-2026"
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: [...imageContents, { type: "text", text: prompt }] }]
+          action: "ai",
+          content: [...imageContents, { type: "text", text: prompt }],
+          max_tokens: 1000
         })
       });
-      const data = await response.json();
+      const wrapper = await response.json();
+      if (wrapper.error) throw new Error(wrapper.error);
+      const data = wrapper.data;
       const text = (data.content||[]).map(b=>b.text||"").join("");
       const clean = text.replace(/```json|```/g,"").trim();
       const parsed = JSON.parse(clean);
