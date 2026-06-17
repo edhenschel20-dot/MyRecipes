@@ -2737,6 +2737,7 @@ function PantryTab({ recipes, version }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [expandedCats, setExpandedCats] = useState({});
+  const [showPhotoImport, setShowPhotoImport] = useState(false);
 
   const pantryMounted = useRef(false);
   useEffect(()=>{ 
@@ -2797,6 +2798,7 @@ function PantryTab({ recipes, version }) {
             🛒 Shopping {shoppingList.length>0&&<span style={{marginLeft:4,background:"white",color:"var(--saffron)",borderRadius:10,padding:"0 5px",fontSize:10,fontWeight:700}}>{shoppingList.length}</span>}
           </button>
           <button className="btn btn-primary btn-sm" onClick={()=>{setEditItem(null);setShowAdd(true);}}>+ Add Item</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>setShowPhotoImport(true)}>📷 Photo Import</button>
         </div>
       </div>
 
@@ -2869,6 +2871,12 @@ function PantryTab({ recipes, version }) {
           onClose={()=>{setShowAdd(false);setEditItem(null);}}
         />
       )}
+      {showPhotoImport && (
+        <PantryPhotoImport
+          onSave={i=>upsert(i)}
+          onClose={()=>setShowPhotoImport(false)}
+        />
+      )}
     </div>
   );
 }
@@ -2902,6 +2910,150 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge }) {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+function PantryPhotoImport({ onSave, onClose }) {
+  const [phase, setPhase] = useState("pick"); // pick | scanning | review
+  const [identified, setIdentified] = useState([]);
+  const [error, setError] = useState("");
+  const [editIdx, setEditIdx] = useState(null);
+  const fileInputRef = useRef(null);
+
+  async function fileToBase64(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(",")[1]);
+      r.onerror = () => rej(new Error("Read failed"));
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files||[]);
+    if (!files.length) return;
+    setPhase("scanning");
+    setError("");
+    try {
+      const imageContents = await Promise.all(files.map(async f => ({
+        type: "image",
+        source: { type: "base64", media_type: f.type||"image/jpeg", data: await fileToBase64(f) }
+      })));
+      const prompt = "You are a pantry inventory assistant. Look at these photos of pantry items. For every distinct product you can identify, return a JSON array (no markdown, no extra text) where each item has: name (short product name), category (one of: Proteins, Produce, Dairy, Grains & Pasta, Canned & Jarred, Spices & Herbs, Sauces & Condiments, Baking, Drinks, Snacks, Other), quantity (visible amount or package size as a string, or empty string if unknown), status (have), notes (empty string). Example: [{\"name\":\"Olive Oil\",\"category\":\"Sauces & Condiments\",\"quantity\":\"1 bottle\",\"status\":\"have\",\"notes\":\"\"}]";
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1000,
+          messages: [{ role: "user", content: [...imageContents, { type: "text", text: prompt }] }]
+        })
+      });
+      const data = await response.json();
+      const text = (data.content||[]).map(b=>b.text||"").join("");
+      const clean = text.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+      setIdentified(parsed.map(item => ({ ...item, id: pantryUid() })));
+      setPhase("review");
+    } catch(err) {
+      setError("Scan failed: " + err.message);
+      setPhase("pick");
+    }
+  }
+
+  function updateItem(idx, key, val) {
+    setIdentified(prev => prev.map((item, i) => i===idx ? {...item, [key]: val} : item));
+  }
+
+  function removeItem(idx) {
+    setIdentified(prev => prev.filter((_,i) => i!==idx));
+  }
+
+  function confirmSave() {
+    identified.forEach(item => onSave(item));
+    onClose();
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:"var(--cream)",borderRadius:"12px 12px 0 0",width:"100%",maxWidth:600,maxHeight:"90vh",overflowY:"auto",padding:24}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700}}>📷 Photo Import</div>
+          <button className="btn-icon" onClick={onClose} style={{fontSize:20}}>✕</button>
+        </div>
+
+        {phase==="pick" && (
+          <div>
+            <p style={{color:"var(--ink-light)",fontSize:14,marginBottom:20}}>Select one or more photos of your pantry items. Claude will identify everything visible and build the list for you to review.</p>
+            {error && <div style={{background:"#fde8e8",border:"1px solid var(--rust)",borderRadius:6,padding:"10px 14px",fontSize:13,color:"var(--rust)",marginBottom:16}}>{error}</div>}
+            <label style={{display:"block",background:"var(--saffron)",color:"white",fontFamily:"'Lato',sans-serif",fontWeight:700,fontSize:13,textTransform:"uppercase",letterSpacing:1,padding:"14px 24px",borderRadius:4,textAlign:"center",cursor:"pointer"}}>
+              📂 Choose Photos
+              <input ref={fileInputRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleFiles} />
+            </label>
+            <p style={{fontSize:12,color:"var(--ink-light)",textAlign:"center",marginTop:12}}>Tap to open your photo gallery or camera</p>
+          </div>
+        )}
+
+        {phase==="scanning" && (
+          <div style={{textAlign:"center",padding:"40px 0"}}>
+            <div style={{fontSize:40,marginBottom:16}}>🔍</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,marginBottom:8}}>Scanning photos…</div>
+            <p style={{color:"var(--ink-light)",fontSize:14}}>Claude is identifying your pantry items</p>
+          </div>
+        )}
+
+        {phase==="review" && (
+          <div>
+            <p style={{color:"var(--ink-light)",fontSize:13,marginBottom:16}}>Found {identified.length} item{identified.length!==1?"s":""}. Edit anything before saving.</p>
+            {identified.map((item, idx) => (
+              <div key={item.id} style={{background:"white",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 14px",marginBottom:10}}>
+                <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+                  <input
+                    style={{flex:1,border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 10px",fontSize:14,fontWeight:600,background:"var(--cream)"}}
+                    value={item.name}
+                    onChange={e=>updateItem(idx,"name",e.target.value)}
+                  />
+                  <button onClick={()=>removeItem(idx)} style={{background:"none",border:"none",color:"var(--rust)",cursor:"pointer",fontSize:18,padding:"0 4px"}}>✕</button>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <select
+                    style={{flex:1,minWidth:140,border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 8px",fontSize:12,background:"var(--cream)"}}
+                    value={item.category}
+                    onChange={e=>updateItem(idx,"category",e.target.value)}
+                  >
+                    {PANTRY_CATS.map(c=><option key={c}>{c}</option>)}
+                  </select>
+                  <input
+                    style={{flex:1,minWidth:100,border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 10px",fontSize:12,background:"var(--cream)"}}
+                    placeholder="Qty (e.g. 1 jar)"
+                    value={item.quantity||""}
+                    onChange={e=>updateItem(idx,"quantity",e.target.value)}
+                  />
+                  <select
+                    style={{border:"1px solid var(--parchment-dark)",borderRadius:4,padding:"6px 8px",fontSize:12,background:"var(--cream)"}}
+                    value={item.status||"have"}
+                    onChange={e=>updateItem(idx,"status",e.target.value)}
+                  >
+                    <option value="have">Have it</option>
+                    <option value="low">Running low</option>
+                    <option value="out">Out / Need</option>
+                  </select>
+                </div>
+              </div>
+            ))}
+            {identified.length===0 && (
+              <div style={{textAlign:"center",padding:"20px 0",color:"var(--ink-light)"}}>All items removed.</div>
+            )}
+            <div style={{display:"flex",gap:10,marginTop:16}}>
+              <button className="btn btn-ghost" onClick={()=>setPhase("pick")} style={{flex:1}}>← Rescan</button>
+              <button className="btn btn-primary" onClick={confirmSave} disabled={identified.length===0} style={{flex:2}}>
+                ✓ Add {identified.length} Item{identified.length!==1?"s":""} to Pantry
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
