@@ -928,11 +928,38 @@ function RecipeBook() {
     if(!window.confirm('Delete this recipe? This cannot be undone.')) return;
     setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==id)}));
     if(selectedRecipe?.id===id) setSelectedRecipe(null);
+
+    // Strip any calendar entries pointing at this recipe so deleted recipes
+    // can't leave orphaned "Recipe not found" rows behind.
+    try {
+      const cal = loadCalendar();
+      let changed = false;
+      for (const date of Object.keys(cal)) {
+        for (const slot of Object.keys(cal[date])) {
+          const entries = Array.isArray(cal[date][slot]) ? cal[date][slot] : [cal[date][slot]];
+          const filtered = entries.filter(e => e && e.id !== id);
+          if (filtered.length !== entries.length) {
+            changed = true;
+            if (filtered.length === 0) delete cal[date][slot];
+            else cal[date][slot] = filtered;
+          }
+        }
+        if (Object.keys(cal[date]).length === 0) delete cal[date];
+      }
+      if (changed) { saveCalendar(cal); setCalVersion(v=>v+1); }
+    } catch(e) { console.warn("Calendar cleanup failed:", e); }
+
     // Also delete from Supabase
     const prefs = loadSyncPrefs();
     if (prefs.enabled) {
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/recipes?id=eq.${id}`, {
+          method: "DELETE",
+          headers: sbHeaders()
+        });
+        // Clean up any calendar rows referencing the deleted recipe too,
+        // so a stale row can't resurface on the next pull from another device.
+        await fetch(`${SUPABASE_URL}/rest/v1/calendar?recipe_id=eq.${id}`, {
           method: "DELETE",
           headers: sbHeaders()
         });
