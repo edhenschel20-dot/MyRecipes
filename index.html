@@ -2858,19 +2858,70 @@ function normalizeWords(str) {
   return (str||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(w=>w.length>2);
 }
 
+// Standard edit-distance calculation (insert/delete/substitute), used to
+// tolerate typos like "paty" vs "patty" or simple plural mismatches like
+// "patty" vs "patties" without requiring exact spelling.
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({length: m+1}, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j=0; j<=n; j++) dp[0][j] = j;
+  for (let i=1; i<=m; i++) {
+    for (let j=1; j<=n; j++) {
+      dp[i][j] = a[i-1]===b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// Strips common plural endings so "patties" and "patty" (or "boxes" and
+// "box") compare as the same root word before typo-tolerance kicks in.
+function simpleStem(w) {
+  if (w.endsWith("ies") && w.length > 5) return w.slice(0,-3) + "y";
+  if (w.endsWith("es") && w.length > 4) return w.slice(0,-2);
+  if (w.endsWith("s") && w.length > 3) return w.slice(0,-1);
+  return w;
+}
+
+// Two words "match" if identical, or close enough by edit distance (after
+// stemming plurals) that a typo or simple plural/singular difference is the
+// most likely explanation. Tolerance scales with word length so short words
+// still need to be exact (e.g. "cup" should never fuzzy-match "cap") while
+// longer words allow a couple of character slips.
+function wordsAreCloseEnough(a, b) {
+  a = simpleStem(a); b = simpleStem(b);
+  if (a === b) return true;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen <= 4) return false; // too short to safely fuzz
+  const tolerance = maxLen <= 6 ? 1 : 2;
+  return levenshtein(a, b) <= tolerance;
+}
+
+function wordSetHasClose(wordSet, word) {
+  for (const w of wordSet) {
+    if (wordsAreCloseEnough(w, word)) return true;
+  }
+  return false;
+}
+
 // Returns true if a pantry item name plausibly appears in an ingredient string.
 // Checks overlap in both directions and takes whichever ratio is more
 // favorable, since pantry names often carry extra descriptive words
 // ("Steak Cut French Fries") that a short recipe ingredient line
-// ("French Fries") or quick-add entry won't repeat back verbatim.
+// ("French Fries") or quick-add entry won't repeat back verbatim. Word
+// comparison itself is typo-tolerant so minor misspellings or singular vs.
+// plural forms ("paty" vs "Patties") don't silently fail to match.
 function fuzzyIngredientMatch(ingredientStr, pantryName) {
   const ingWords = normalizeWords(ingredientStr);
   const nameWords = normalizeWords(pantryName);
   if (nameWords.length === 0 || ingWords.length === 0) return false;
   const ingSet = new Set(ingWords);
   const nameSet = new Set(nameWords);
-  const hitsInName = nameWords.filter(w=>ingSet.has(w)).length;
-  const hitsInIng = ingWords.filter(w=>nameSet.has(w)).length;
+  const hitsInName = nameWords.filter(w=>wordSetHasClose(ingSet,w)).length;
+  const hitsInIng = ingWords.filter(w=>wordSetHasClose(nameSet,w)).length;
   const ratioA = hitsInName / nameWords.length; // how much of the pantry name shows up in the ingredient
   const ratioB = hitsInIng / ingWords.length;   // how much of the ingredient shows up in the pantry name
   return Math.max(ratioA, ratioB) >= 0.6;
