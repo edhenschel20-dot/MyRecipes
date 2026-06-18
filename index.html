@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>The Recipe Book</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Recipes" />
+  <meta name="theme-color" content="#8b6914" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -770,6 +775,7 @@ function uid() { return "r" + Math.random().toString(36).slice(2,9); }
 function RecipeBook() {
   const [data, setData] = useState(() => loadData());
   const [tab, setTab] = useState("library");
+  const [pendingShareData, setPendingShareData] = useState(null);
   const [search, setSearch] = useState("");
   const [filterCuisine, setFilterCuisine] = useState("");
   const [filterTag, setFilterTag] = useState("");
@@ -777,6 +783,19 @@ function RecipeBook() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
+
+  // Handle Web Share Target incoming data
+  useEffect(() => {
+    const raw = sessionStorage.getItem('pendingShare');
+    if (raw) {
+      sessionStorage.removeItem('pendingShare');
+      try {
+        const share = JSON.parse(raw);
+        setPendingShareData(share);
+        setTab('import');
+      } catch(e) {}
+    }
+  }, []);
 
   // Handle browser back button
   useEffect(() => {
@@ -1038,7 +1057,7 @@ function RecipeBook() {
           upsertRecipe(r); setTab("library");
         }} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection),currentIndex:0}); }} />}
-        {tab==="import" && <ImportTab onImport={r=>{
+        {tab==="import" && <ImportTab pendingShare={pendingShareData} onImport={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
             if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
@@ -2269,7 +2288,7 @@ async function fetchAndAttachPhoto(recipe) {
 
 
 // ── Import Tab ─────────────────────────────────────────────────────────────
-function ImportTab({onImport}) {
+function ImportTab({onImport, pendingShare}) {
   const [mode,setMode] = useState("stashcook");
   const [pasteText,setPasteText] = useState("");
   const [urlInput,setUrlInput] = useState("");
@@ -2277,6 +2296,19 @@ function ImportTab({onImport}) {
   const [result,setResult] = useState(null);
   const [error,setError] = useState("");
   const [imported,setImported] = useState([]);
+
+  // Auto-populate from Web Share Target
+  useEffect(() => {
+    if (!pendingShare) return;
+    const { text, url } = pendingShare;
+    if (url && url.startsWith("http")) {
+      setMode("url");
+      setUrlInput(url);
+    } else if (text) {
+      setMode("text");
+      setPasteText(text);
+    }
+  }, [pendingShare]);
   async function handleStashcookParse() {
     setError(""); setResult(null);
     const r = parseStashcook(pasteText);
@@ -4187,5 +4219,29 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<RecipeBook />);
   </script>
+<script>
+  // Register service worker for PWA installability
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW:', e));
+  }
+
+  // Handle Web Share Target — when app receives a share from Android
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const sharedText = params.get('share_text') || '';
+    const sharedUrl  = params.get('share_url')  || '';
+    const sharedTitle = params.get('share_title') || '';
+    if (sharedText || sharedUrl) {
+      // Store in sessionStorage so React can pick it up after mount
+      sessionStorage.setItem('pendingShare', JSON.stringify({
+        text: sharedText,
+        url: sharedUrl,
+        title: sharedTitle
+      }));
+      // Clean URL without reloading
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  })();
+</script>
 </body>
 </html>
