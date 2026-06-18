@@ -1,0 +1,27 @@
+{
+  "name": "The Recipe Book",
+  "short_name": "Recipes",
+  "description": "The Henschel family recipe book",
+  "start_url": "/MyRecipes/",
+  "scope": "/MyRecipes/",
+  "display": "standalone",
+  "background_color": "#f5f0e8",
+  "theme_color": "#8b6914",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/MyRecipes/",
+    "method": "GET",
+    "params": {
+      "title": "share_title",
+      "text": "share_text",
+      "url": "share_url"
+    }
+  }
+}
