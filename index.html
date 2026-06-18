@@ -2859,13 +2859,21 @@ function normalizeWords(str) {
 }
 
 // Returns true if a pantry item name plausibly appears in an ingredient string.
+// Checks overlap in both directions and takes whichever ratio is more
+// favorable, since pantry names often carry extra descriptive words
+// ("Steak Cut French Fries") that a short recipe ingredient line
+// ("French Fries") or quick-add entry won't repeat back verbatim.
 function fuzzyIngredientMatch(ingredientStr, pantryName) {
-  const ingWords = new Set(normalizeWords(ingredientStr));
+  const ingWords = normalizeWords(ingredientStr);
   const nameWords = normalizeWords(pantryName);
-  if (nameWords.length === 0) return false;
-  const hits = nameWords.filter(w=>ingWords.has(w)).length;
-  // require majority of the pantry item's significant words to appear in the ingredient line
-  return hits / nameWords.length >= 0.6;
+  if (nameWords.length === 0 || ingWords.length === 0) return false;
+  const ingSet = new Set(ingWords);
+  const nameSet = new Set(nameWords);
+  const hitsInName = nameWords.filter(w=>ingSet.has(w)).length;
+  const hitsInIng = ingWords.filter(w=>nameSet.has(w)).length;
+  const ratioA = hitsInName / nameWords.length; // how much of the pantry name shows up in the ingredient
+  const ratioB = hitsInIng / ingWords.length;   // how much of the ingredient shows up in the pantry name
+  return Math.max(ratioA, ratioB) >= 0.6;
 }
 
 // Scans calendar for date<=today, matches recipe ingredients against
