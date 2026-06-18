@@ -1019,7 +1019,7 @@ function RecipeBook() {
           upsertRecipe(r); setEditRecipe(r); setTab("library");
         }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
-        {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} />}
+        {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{
           // Only check duplicates for new recipes, not edits
@@ -3522,7 +3522,7 @@ function CalorieBar({ consumed, goal }) {
   );
 }
 
-function CalendarTab({ recipes, version }) {
+function CalendarTab({ recipes, version, onQuickAddRecipe }) {
   const [calData, setCalData] = useState(()=>loadCalendar());
   useEffect(()=>{ if(version>0) setCalData(loadCalendar()); },[version]);
   const [prefs, setPrefs] = useState(()=>loadCalPrefs());
@@ -3909,6 +3909,7 @@ function CalendarTab({ recipes, version }) {
           dateKey={assignModal.dateKey} slot={assignModal.slot}
           recipes={recipes} currentIds={(()=>{const e=calData[assignModal.dateKey]?.[assignModal.slot];return Array.isArray(e)?e.map(x=>x.id):(e?[e.id]:[]);})()}
           trackingEnabled={prefs.trackingEnabled}
+          onQuickAddRecipe={onQuickAddRecipe}
           onAssign={(recipeId,servings,leftoverSlot,leftoverDays)=>{
             if(leftoverSlot&&leftoverDays>0) assignWithLeftovers(assignModal.dateKey,assignModal.slot,recipeId,servings,leftoverSlot,leftoverDays);
             else addMeal(assignModal.dateKey,assignModal.slot,recipeId,servings);
@@ -3922,7 +3923,7 @@ function CalendarTab({ recipes, version }) {
 }
 
 
-function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnabled, onAssign, onClose }) {
+function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnabled, onQuickAddRecipe, onAssign, onClose }) {
   const [search,setSearch]=useState("");
   const [chosen,setChosen]=useState(null);
   const [servings,setServings]=useState(1);
@@ -3930,6 +3931,7 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
   const [leftoverSlot,setLeftoverSlot]=useState("lunch");
   const [leftoverDays,setLeftoverDays]=useState(2);
   const [step,setStep]=useState("pick");
+  const [quickAdding,setQuickAdding]=useState(false);
 
   const filtered=recipes.filter(r=>{
     const q=search.toLowerCase();
@@ -3938,6 +3940,35 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
   const chosenRecipe=recipes.find(r=>r.id===chosen);
   const previewCals=chosenRecipe?.calories?Math.round(chosenRecipe.calories*servings):null;
   const dateLabel=new Date(dateKey+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+
+  // Offer quick-add when the typed search doesn't exactly match an existing recipe title.
+  const trimmedSearch = search.trim();
+  const exactMatch = trimmedSearch && recipes.some(r=>r.title.toLowerCase()===trimmedSearch.toLowerCase());
+  const showQuickAdd = trimmedSearch.length>0 && !exactMatch && onQuickAddRecipe;
+
+  async function handleQuickAdd() {
+    if (!trimmedSearch || quickAdding) return;
+    setQuickAdding(true);
+    const quick = {
+      id: uid(),
+      title: trimmedSearch,
+      description: "",
+      cuisine: "American",
+      categories: ["Other"],
+      servings: 1,
+      prepTime: 0,
+      cookTime: 0,
+      tags: ["quick-add"],
+      diets: [],
+      ingredients: [trimmedSearch],
+      steps: [],
+      notes: "",
+      isQuickAdd: true
+    };
+    await onQuickAddRecipe(quick);
+    setChosen(quick.id);
+    setQuickAdding(false);
+  }
 
   if(step==="leftovers") return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -3993,6 +4024,17 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
           <button className="btn-icon" style={{fontSize:22}} onClick={onClose}>✕</button>
         </div>
         <input className="search-input" style={{width:"100%",marginBottom:12}} placeholder="Search recipes…" value={search} onChange={e=>setSearch(e.target.value)} />
+        {showQuickAdd && (
+          <div onClick={handleQuickAdd}
+            style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:6,cursor:quickAdding?"default":"pointer",
+              border:"2px dashed var(--saffron)",background:"rgba(212,137,26,0.06)",marginBottom:12,opacity:quickAdding?0.6:1}}>
+            <span style={{fontSize:18}}>⚡</span>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:14}}>{quickAdding?"Adding…":`Quick add "${trimmedSearch}"`}</div>
+              <div style={{fontSize:11,color:"var(--ink-light)"}}>No recipe needed — just plan it on the calendar</div>
+            </div>
+          </div>
+        )}
         <div style={{maxHeight:360,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
           {filtered.map(r=>{
             const photos=r.photos&&r.photos.length>0?r.photos:(r.photo?[r.photo]:[]);
