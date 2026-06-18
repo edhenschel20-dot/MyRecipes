@@ -3946,9 +3946,33 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
   const exactMatch = trimmedSearch && recipes.some(r=>r.title.toLowerCase()===trimmedSearch.toLowerCase());
   const showQuickAdd = trimmedSearch.length>0 && !exactMatch && onQuickAddRecipe;
 
+  async function estimateNutrition(foodName) {
+    try {
+      const prompt = `Estimate typical nutrition for one serving of "${foodName}" as it would commonly be prepared at home. Return ONLY a JSON object, no markdown, no extra text, with these exact numeric fields (no units, just numbers, reasonable single-serving estimates): {"calories":0,"protein":0,"carbs":0,"fat":0}`;
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "x-claude-secret": "henschel-claude-2026"
+        },
+        body: JSON.stringify({ action: "ai", content: prompt, max_tokens: 200 })
+      });
+      const wrapper = await response.json();
+      if (wrapper.error) throw new Error(wrapper.error);
+      const text = (wrapper.data.content||[]).map(b=>b.text||"").join("");
+      const clean = text.replace(/```json|```/g,"").trim();
+      return JSON.parse(clean);
+    } catch {
+      return null; // estimate failed — fall back to letting the user type it in manually
+    }
+  }
+
   async function handleQuickAdd() {
     if (!trimmedSearch || quickAdding) return;
     setQuickAdding(true);
+    const nutrition = await estimateNutrition(trimmedSearch);
     const quick = {
       id: uid(),
       title: trimmedSearch,
@@ -3960,9 +3984,13 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
       cookTime: 0,
       tags: ["quick-add"],
       diets: [],
+      calories: nutrition?.calories ?? null,
+      protein: nutrition?.protein ?? null,
+      carbs: nutrition?.carbs ?? null,
+      fat: nutrition?.fat ?? null,
       ingredients: [trimmedSearch],
       steps: [],
-      notes: "",
+      notes: nutrition ? "" : "Calories not estimated — edit this recipe to add nutrition info manually.",
       isQuickAdd: true
     };
     await onQuickAddRecipe(quick);
@@ -4030,7 +4058,7 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnable
               border:"2px dashed var(--saffron)",background:"rgba(212,137,26,0.06)",marginBottom:12,opacity:quickAdding?0.6:1}}>
             <span style={{fontSize:18}}>⚡</span>
             <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:14}}>{quickAdding?"Adding…":`Quick add "${trimmedSearch}"`}</div>
+              <div style={{fontWeight:700,fontSize:14}}>{quickAdding?"Estimating nutrition…":`Quick add "${trimmedSearch}"`}</div>
               <div style={{fontSize:11,color:"var(--ink-light)"}}>No recipe needed — just plan it on the calendar</div>
             </div>
           </div>
