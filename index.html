@@ -782,6 +782,7 @@ function RecipeBook() {
   const [filterDiet, setFilterDiet] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterFavorites, setFilterFavorites] = useState(false);
+  const [hideQuickAdd, setHideQuickAdd] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
 
   // Handle Web Share Target incoming data
@@ -997,7 +998,8 @@ function RecipeBook() {
       && (!filterTag || (r.tags||[]).includes(filterTag))
       && (!filterDiet || (r.diets||[]).includes(filterDiet))
       && (!filterCategory || (r.categories||[]).includes(filterCategory))
-      && (!filterFavorites || r.favorite === true);
+      && (!filterFavorites || r.favorite === true)
+      && (!hideQuickAdd || !r.isQuickAdd);
   });
 
   function startCookMode(recipe) {
@@ -1048,7 +1050,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
@@ -1100,7 +1102,7 @@ function RecipeBook() {
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto}) {
   const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
@@ -1128,6 +1130,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
           <option value="calories">🔥 Calories</option>
         </select>
         <button className={`fav-filter-btn${filterFavorites?" active":""}`} onClick={()=>setFilterFavorites(f=>!f)}>❤️</button>
+        <button className={`fav-filter-btn${hideQuickAdd?" active":""}`} title="Hide quick-add meals" onClick={()=>setHideQuickAdd(h=>!h)}>⚡️🚫</button>
       </div>
       {selectedRecipe ? (
         <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} onQuickPhoto={onQuickPhoto} />
