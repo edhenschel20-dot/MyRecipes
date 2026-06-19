@@ -999,7 +999,7 @@ function RecipeBook() {
       && (!filterDiet || (r.diets||[]).includes(filterDiet))
       && (!filterCategory || (r.categories||[]).includes(filterCategory))
       && (!filterFavorites || r.favorite === true)
-      && (!hideQuickAdd || !r.isQuickAdd);
+      && (!hideQuickAdd || !(r.isQuickAdd || (r.tags||[]).includes("quick-add")));
   });
 
   function startCookMode(recipe) {
