@@ -1046,7 +1046,7 @@ function RecipeBook() {
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -1068,6 +1068,7 @@ function RecipeBook() {
         }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} />}
+        {tab==="foodlog" && <FoodLogTab />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{
           // Only check duplicates for new recipes, not edits
@@ -3594,6 +3595,31 @@ function loadCalPrefs() {
 }
 function saveCalPrefs(p) { try { localStorage.setItem(CAL_PREFS_KEY,JSON.stringify(p)); } catch {} }
 
+// ── Personal Food Log (separate from meal-planning calendar) ────────────────
+const FOODLOG_KEY = "recipebook_foodlog_v1";
+const FOODLOG_PREFS_KEY = "recipebook_foodlog_prefs_v1";
+function loadFoodLog() {
+  try { const r=localStorage.getItem(FOODLOG_KEY); if(r) return JSON.parse(r); } catch {}
+  return [];
+}
+function saveFoodLog(d) { try { localStorage.setItem(FOODLOG_KEY,JSON.stringify(d)); } catch {} }
+function loadFoodLogPrefs() {
+  try { const r=localStorage.getItem(FOODLOG_PREFS_KEY); if(r) return {...{people:["Ed","Wife"],goals:{},devicePerson:null},...JSON.parse(r)}; } catch {}
+  return { people:["Ed","Wife"], goals:{}, devicePerson:null };
+}
+function saveFoodLogPrefs(p) { try { localStorage.setItem(FOODLOG_PREFS_KEY,JSON.stringify(p)); } catch {} }
+async function pushFoodLogEntry(e) {
+  try {
+    await sbUpsert("food_log", [{ id:e.id, person:e.person, date:e.date, time:e.time||"", name:e.name, calories:e.calories??null, carbs:e.carbs??null, protein:e.protein??null, fat:e.fat??null }]);
+  } catch(err) { console.warn("food_log push failed:", err); }
+}
+async function deleteFoodLogEntry(id) {
+  try { await fetch(`${SUPABASE_URL}/rest/v1/food_log?id=eq.${id}`, { method:"DELETE", headers: sbHeaders() }); } catch(err) { console.warn("food_log delete failed:", err); }
+}
+async function pullFoodLog() {
+  try { return await sbGet("food_log"); } catch(err) { console.warn("food_log pull failed:", err); return null; }
+}
+
 function dateKey(year,month,day) {
   return `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
 }
@@ -4043,6 +4069,207 @@ function CalendarTab({ recipes, version, onQuickAddRecipe }) {
   );
 }
 
+
+function GoalBar({ label, consumed, goal, unit, color }) {
+  if (!goal) return (
+    <div style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"6px 0"}}>
+      <span style={{fontWeight:700}}>{label}</span>
+      <span style={{color:"var(--ink-light)"}}>{consumed}{unit} logged</span>
+    </div>
+  );
+  const pct = Math.min(100, Math.round((consumed/goal)*100));
+  const barColor = pct >= 100 ? "#b84a2e" : pct >= 85 ? "#d4891a" : color;
+  const remaining = goal - consumed;
+  return (
+    <div style={{marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}>
+        <span style={{fontWeight:700,color:barColor}}>{label}: {consumed}{unit}</span>
+        <span style={{color:"var(--ink-light)"}}>{remaining>=0?`${remaining}${unit} left`:`${Math.abs(remaining)}${unit} over`} · goal {goal}{unit}</span>
+      </div>
+      <div style={{height:8,background:"var(--parchment-dark)",borderRadius:4,overflow:"hidden"}}>
+        <div style={{height:"100%",width:pct+"%",background:barColor,borderRadius:4,transition:"width 0.4s"}}/>
+      </div>
+    </div>
+  );
+}
+
+function FoodLogTab() {
+  const [prefs, setPrefs] = useState(()=>loadFoodLogPrefs());
+  const [entries, setEntries] = useState(()=>loadFoodLog());
+  const [activePerson, setActivePerson] = useState(()=>{ const p=loadFoodLogPrefs(); return p.devicePerson || p.people[0]; });
+  const [viewDate, setViewDate] = useState(()=>todayKey());
+  const [showWhoPicker, setShowWhoPicker] = useState(()=>{ const p=loadFoodLogPrefs(); return !p.devicePerson; });
+  const [showSettings, setShowSettings] = useState(false);
+  const [foodInput, setFoodInput] = useState("");
+  const [estimating, setEstimating] = useState(false);
+  const [manualCal, setManualCal] = useState("");
+  const [manualCarbs, setManualCarbs] = useState("");
+  const [pulled, setPulled] = useState(false);
+
+  useEffect(()=>{ saveFoodLogPrefs(prefs); },[prefs]);
+  useEffect(()=>{ saveFoodLog(entries); },[entries]);
+
+  // Pull latest entries from Supabase once on mount so both phones stay in sync.
+  useEffect(()=>{
+    (async()=>{
+      const rows = await pullFoodLog();
+      if (rows && rows.length>0) {
+        const mapped = rows.map(r=>({ id:r.id, person:r.person, date:r.date, time:r.time||"", name:r.name, calories:r.calories, carbs:r.carbs, protein:r.protein, fat:r.fat }));
+        setEntries(mapped);
+      }
+      setPulled(true);
+    })();
+  },[]);
+
+  function choosePerson(name) {
+    setActivePerson(name);
+    setPrefs(p=>({...p, devicePerson:name}));
+    setShowWhoPicker(false);
+  }
+
+  async function addEntry({ name, calories, carbs, protein=null, fat=null }) {
+    const entry = { id:"f"+Math.random().toString(36).slice(2,10), person:activePerson, date:viewDate, time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}), name, calories, carbs, protein, fat };
+    setEntries(es=>[...es, entry]);
+    await pushFoodLogEntry(entry);
+  }
+  async function removeEntry(id) {
+    setEntries(es=>es.filter(e=>e.id!==id));
+    await deleteFoodLogEntry(id);
+  }
+
+  async function estimateAndAdd() {
+    const name = foodInput.trim();
+    if (!name || estimating) return;
+    setEstimating(true);
+    try {
+      const prompt = `Estimate typical nutrition for "${name}" as it would commonly be prepared/eaten. Return ONLY a JSON object, no markdown, no extra text: {"calories":0,"carbs":0,"protein":0,"fat":0}`;
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "apikey":SUPABASE_KEY, "Authorization":`Bearer ${SUPABASE_KEY}`, "x-claude-secret":"henschel-claude-2026" },
+        body: JSON.stringify({ action:"ai", content:prompt, max_tokens:200 })
+      });
+      const wrapper = await response.json();
+      if (wrapper.error) throw new Error(wrapper.error);
+      const text = (wrapper.data.content||[]).map(b=>b.text||"").join("");
+      const clean = text.replace(/```json|```/g,"").trim();
+      const n = JSON.parse(clean);
+      await addEntry({ name, calories: n.calories??null, carbs: n.carbs??null, protein: n.protein??null, fat: n.fat??null });
+    } catch(e) {
+      await addEntry({ name, calories: manualCal?+manualCal:null, carbs: manualCarbs?+manualCarbs:null });
+    }
+    setFoodInput(""); setManualCal(""); setManualCarbs(""); setEstimating(false);
+  }
+
+  function addManual() {
+    const name = foodInput.trim();
+    if (!name) return;
+    addEntry({ name, calories: manualCal?+manualCal:null, carbs: manualCarbs?+manualCarbs:null });
+    setFoodInput(""); setManualCal(""); setManualCarbs("");
+  }
+
+  const dayEntries = entries.filter(e=>e.person===activePerson && e.date===viewDate).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  const totalCal = dayEntries.reduce((s,e)=>s+(e.calories||0),0);
+  const totalCarbs = dayEntries.reduce((s,e)=>s+(e.carbs||0),0);
+  const personGoals = prefs.goals?.[activePerson] || {};
+  const dateLabel = new Date(viewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  const isToday = viewDate===todayKey();
+
+  if (showWhoPicker) return (
+    <div style={{maxWidth:420,margin:"40px auto",textAlign:"center"}}>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,fontWeight:700,marginBottom:8}}>Who's logging on this device?</div>
+      <p style={{fontSize:13,color:"var(--ink-mid)",marginBottom:20}}>This is remembered per phone — you can switch later from settings.</p>
+      <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+        {prefs.people.map(p=><button key={p} className="btn btn-primary" onClick={()=>choosePerson(p)}>{p}</button>)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{maxWidth:560,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",gap:6}}>
+          {prefs.people.map(p=>(
+            <button key={p} className={`btn btn-sm ${activePerson===p?"btn-primary":"btn-outline"}`} onClick={()=>choosePerson(p)}>{p}</button>
+          ))}
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={()=>setShowSettings(true)}>⚙️ Settings</button>
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <button className="btn btn-ghost btn-sm" onClick={()=>setViewDate(d=>addDays(d,-1))}>‹</button>
+        <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:16}}>{dateLabel}{isToday&&<span style={{marginLeft:8,fontSize:11,background:"var(--saffron)",color:"white",padding:"1px 7px",borderRadius:10,fontFamily:"'Lato',sans-serif",fontWeight:700}}>Today</span>}</div>
+        <button className="btn btn-ghost btn-sm" onClick={()=>setViewDate(d=>addDays(d,1))}>›</button>
+      </div>
+
+      <div style={{background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 16px",marginBottom:14}}>
+        <GoalBar label="Calories" consumed={totalCal} goal={personGoals.calorieGoal||0} unit=" cal" color="var(--sage)"/>
+        <GoalBar label="Carbs" consumed={totalCarbs} goal={personGoals.carbGoal||0} unit="g" color="#5a7a9a"/>
+      </div>
+
+      <div style={{background:"var(--parchment-dark)",borderRadius:6,padding:12,marginBottom:14}}>
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
+          <input className="search-input" style={{flex:1}} placeholder="What did you eat?" value={foodInput}
+            onChange={e=>setFoodInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")estimateAndAdd();}} />
+          <button className="btn btn-primary btn-sm" disabled={!foodInput.trim()||estimating} onClick={estimateAndAdd}>{estimating?"…":"⚡ AI Add"}</button>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input className="form-input" type="number" placeholder="cal (optional)" value={manualCal} onChange={e=>setManualCal(e.target.value)} style={{maxWidth:120}}/>
+          <input className="form-input" type="number" placeholder="carbs g (optional)" value={manualCarbs} onChange={e=>setManualCarbs(e.target.value)} style={{maxWidth:140}}/>
+          <button className="btn btn-outline btn-sm" disabled={!foodInput.trim()} onClick={addManual}>+ Add manually</button>
+        </div>
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {dayEntries.length===0&&<div style={{fontSize:13,color:"var(--ink-light)",fontStyle:"italic",textAlign:"center",padding:20}}>Nothing logged yet for {activePerson}.</div>}
+        {dayEntries.map(e=>(
+          <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:700,fontSize:14}}>{e.name}</div>
+              <div style={{fontSize:12,color:"var(--ink-light)"}}>{e.time} {e.calories!=null&&`· 🔥 ${e.calories} cal`} {e.carbs!=null&&`· ${e.carbs}g carbs`}</div>
+            </div>
+            <button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>removeEntry(e.id)}>✕</button>
+          </div>
+        ))}
+      </div>
+
+      {showSettings && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setShowSettings(false)}>
+          <div className="modal" style={{maxWidth:420}}>
+            <div className="modal-title">Food Log Settings</div>
+            {prefs.people.map((p,i)=>(
+              <div key={p} style={{borderBottom:i<prefs.people.length-1?"1px solid var(--parchment-dark)":"none",paddingBottom:14,marginBottom:14}}>
+                <div className="form-group">
+                  <label className="form-label">Name</label>
+                  <input className="form-input" value={p} onChange={e=>{
+                    const name=e.target.value;
+                    setPrefs(pr=>{
+                      const people=pr.people.map((x,idx)=>idx===i?name:x);
+                      const goals={...pr.goals}; if(pr.goals?.[p]){goals[name]=pr.goals[p]; if(name!==p)delete goals[p];}
+                      return {...pr, people, goals, devicePerson: pr.devicePerson===p?name:pr.devicePerson};
+                    });
+                  }} />
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <div className="form-group" style={{flex:1}}>
+                    <label className="form-label">Calorie goal</label>
+                    <input className="form-input" type="number" placeholder="e.g. 2000" value={prefs.goals?.[p]?.calorieGoal||""}
+                      onChange={e=>setPrefs(pr=>({...pr, goals:{...pr.goals, [p]:{...(pr.goals?.[p]||{}), calorieGoal:+e.target.value||0}}}))} />
+                  </div>
+                  <div className="form-group" style={{flex:1}}>
+                    <label className="form-label">Carb goal (g)</label>
+                    <input className="form-input" type="number" placeholder="e.g. 100" value={prefs.goals?.[p]?.carbGoal||""}
+                      onChange={e=>setPrefs(pr=>({...pr, goals:{...pr.goals, [p]:{...(pr.goals?.[p]||{}), carbGoal:+e.target.value||0}}}))} />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button className="btn btn-primary" onClick={()=>setShowSettings(false)}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AssignMealModal({ dateKey, slot, recipes, currentIds=[], trackingEnabled, onQuickAddRecipe, onAssign, onClose }) {
   const [search,setSearch]=useState("");
