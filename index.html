@@ -3341,6 +3341,25 @@ function shoppingBaseName(name) {
 // field on a calendar entry scales ingredients accordingly. Each need also
 // keeps a byRecipe breakdown (recipe name -> amount contributed) so the
 // merged total can still show where each portion is going, for planning.
+// Lets Ed/Sue manually pin a specific pantry item as the stand-in for an
+// ingredient phrase that never matches well on its own — e.g. "garlic
+// cloves" (always fresh-clove-counted in recipes) mapped to "Minced Garlic"
+// (what's actually kept stocked). Deliberately opt-in per ingredient rather
+// than an automatic alias like the salt fix: unlike salt varieties, "garlic
+// cloves" sometimes really does mean whole cloves are needed, so the default
+// stays unmatched/visible until the person chooses to substitute.
+const INGREDIENT_SUBS_KEY = "recipebook_ingredient_subs_v1";
+function loadIngredientSubs() {
+  try { const r=localStorage.getItem(INGREDIENT_SUBS_KEY); if(r) return JSON.parse(r); } catch {}
+  return {};
+}
+function saveIngredientSubs(map) { try { localStorage.setItem(INGREDIENT_SUBS_KEY, JSON.stringify(map)); } catch {} }
+// Order-independent key so "garlic cloves" and "cloves garlic" (different
+// recipes phrase it differently) resolve to the same substitution.
+function substitutionKey(name) {
+  return normalizeWords(name).sort().join(" ");
+}
+
 function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
   const needs = {};
   for (const [date, slots] of Object.entries(calendar||{})) {
@@ -3392,7 +3411,7 @@ function formatNeedBreakdown(need) {
 // in the given date range (skipped entirely if pantry already shows "have"
 // for a fuzzy-matched item, since current stock is assumed to cover it),
 // merged with the existing low/out restock list so nothing is duplicated.
-function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd, usePackages) {
+function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd, usePackages, subs) {
   const restock = pantryItems.filter(i=>i.status==="low"||i.status==="out");
   if (!rangeStart || !rangeEnd) {
     return restock.map(i=>({...i, mealQty:null, mealRecipes:null}));
@@ -3401,13 +3420,17 @@ function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd,
   const usedPantryIds = new Set();
   const mealItems = [];
   for (const need of needs) {
-    const match = pantryItems.find(p => fuzzyIngredientMatch(need.name, p.name));
+    const subKey = substitutionKey(need.name);
+    const subbedId = subs && subs[subKey];
+    let match = subbedId ? pantryItems.find(p=>p.id===subbedId) : null;
+    const isSubstituted = !!match;
+    if (!match) match = pantryItems.find(p => fuzzyIngredientMatch(need.name, p.name));
     const qtyStr = formatNeedQty(need, usePackages);
     const recipeList = formatNeedBreakdown(need);
     if (match) {
-      if (match.status === "have") continue; // assume current stock covers it
+      if (match.status === "have") continue; // assume current stock covers it, whether matched via substitution or fuzzy match
       usedPantryIds.add(match.id);
-      mealItems.push({ ...match, mealQty: qtyStr || null, mealRecipes: recipeList });
+      mealItems.push({ ...match, mealQty: qtyStr || null, mealRecipes: recipeList, substitutionKey: subKey, forIngredient: need.name, isSubstituted });
     } else {
       mealItems.push({
         id: "meal-"+normalizeWords(need.name).join("-"),
@@ -3418,7 +3441,9 @@ function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd,
         notes: "",
         mealQty: qtyStr || null,
         mealRecipes: recipeList,
-        notInPantry: true
+        notInPantry: true,
+        substitutionKey: subKey,
+        forIngredient: need.name
       });
     }
   }
@@ -3441,6 +3466,15 @@ function PantryTab({ recipes, version }) {
   const [mealRangeStart, setMealRangeStart] = useState("");
   const [mealRangeEnd, setMealRangeEnd] = useState("");
   const [usePackages, setUsePackages] = useState(true);
+  const [ingredientSubs, setIngredientSubsState] = useState(()=>loadIngredientSubs());
+  function setSubstitution(key, pantryItemId) {
+    setIngredientSubsState(prev => {
+      const next = { ...prev };
+      if (pantryItemId) next[key] = pantryItemId; else delete next[key];
+      saveIngredientSubs(next);
+      return next;
+    });
+  }
 
   // Re-scan for auto-deduct matches every time the Pantry tab mounts/loads.
   useEffect(()=>{
@@ -3494,8 +3528,8 @@ function PantryTab({ recipes, version }) {
 
   const restockCount = items.filter(i=>i.status==="low"||i.status==="out").length;
   const shoppingList = useMemo(
-    () => buildShoppingList(items, loadCalendar(), recipes||[], mealRangeStart, mealRangeEnd, usePackages),
-    [items, recipes, mealRangeStart, mealRangeEnd, usePackages, version]
+    () => buildShoppingList(items, loadCalendar(), recipes||[], mealRangeStart, mealRangeEnd, usePackages, ingredientSubs),
+    [items, recipes, mealRangeStart, mealRangeEnd, usePackages, ingredientSubs, version]
   );
   const usedCats = [...new Set(filtered.map(i=>i.category||"Other"))].sort();
 
@@ -3561,7 +3595,7 @@ function PantryTab({ recipes, version }) {
               </label>
             )}
           </div>
-          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} />
+          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} />
         </>
       ) : (
         <>
@@ -3652,7 +3686,19 @@ function PantryTab({ recipes, version }) {
   );
 }
 
-function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals }) {
+// Pantry items sharing at least one normalized word with the ingredient
+// phrase are surfaced first (so "garlic cloves" puts "Minced Garlic" right
+// at the top); falls back to the full pantry list if nothing shares a word,
+// so the dropdown is never just empty.
+function substituteCandidates(forIngredient, allPantryItems) {
+  const ingWords = new Set(normalizeWords(forIngredient));
+  const related = allPantryItems.filter(p => normalizeWords(p.name).some(w=>ingWords.has(w)));
+  const rest = allPantryItems.filter(p => !related.includes(p));
+  return [...related, ...rest];
+}
+
+function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute }) {
+  const [openSubFor, setOpenSubFor] = useState(null);
   const grouped = {};
   items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
 
@@ -3668,27 +3714,48 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals })
     <div>
       <p className="text-muted" style={{marginBottom:16}}>
         Tap a badge to update status when you restock.
-        {showingMeals && " Items marked 📅 are pulled in from meals on your calendar."}
+        {showingMeals && " Items marked 📅 are pulled in from meals on your calendar — tap 🔁 to swap in what you actually buy instead."}
       </p>
       {Object.entries(grouped).map(([cat,catItems])=>(
         <div key={cat} style={{marginBottom:16}}>
           <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"var(--ink-light)",marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--parchment-dark)"}}>{cat}</div>
           {catItems.map(item=>(
-            <div key={item.id} style={{display:"flex",alignItems:"center",padding:"10px 0",borderBottom:"1px dashed var(--parchment-dark)",gap:10}}>
-              <div style={{flex:1}}>
+            <div key={item.id} style={{display:"flex",flexWrap:"wrap",alignItems:"center",padding:"10px 0",borderBottom:"1px dashed var(--parchment-dark)",gap:10}}>
+              <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:600,fontSize:15}}>
                   {item.mealQty && <span title={item.mealRecipes?`For: ${item.mealRecipes}`:""}>📅 </span>}
                   {item.name}
                 </div>
+                {item.isSubstituted && <div style={{fontSize:11,color:"var(--ink-light)",fontStyle:"italic"}}>standing in for "{item.forIngredient}"</div>}
                 {item.mealQty
                   ? <div style={{fontSize:12,color:"var(--ink-light)"}}>Need {item.mealQty}{item.mealRecipes?` for ${item.mealRecipes}`:""}</div>
                   : (pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>)
                 }
               </div>
-              {item.notInPantry
-                ? <span style={{fontSize:11,color:"var(--ink-light)",fontStyle:"italic"}}>not in pantry</span>
-                : <div onClick={()=>onCycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
-              }
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {item.substitutionKey && (
+                  <button className="btn-icon" style={{fontSize:14}} title="Substitute with a different pantry item" onClick={()=>setOpenSubFor(openSubFor===item.substitutionKey?null:item.substitutionKey)}>🔁</button>
+                )}
+                {item.notInPantry
+                  ? <span style={{fontSize:11,color:"var(--ink-light)",fontStyle:"italic"}}>not in pantry</span>
+                  : <div onClick={()=>onCycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
+                }
+              </div>
+              {openSubFor===item.substitutionKey && (
+                <div style={{flexBasis:"100%",marginTop:2}}>
+                  <select
+                    className="filter-select"
+                    style={{width:"100%"}}
+                    defaultValue=""
+                    onChange={e=>{ onSubstitute(item.substitutionKey, e.target.value||null); setOpenSubFor(null); }}
+                  >
+                    <option value="">{item.isSubstituted ? `— stop substituting, use "${item.forIngredient}" as written —` : `— use "${item.forIngredient}" as written —`}</option>
+                    {substituteCandidates(item.forIngredient, allPantryItems||[]).map(p=>
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    )}
+                  </select>
+                </div>
+              )}
             </div>
           ))}
         </div>
