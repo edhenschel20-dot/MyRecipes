@@ -784,6 +784,7 @@ function RecipeBook() {
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [hideQuickAdd, setHideQuickAdd] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [planRecipe, setPlanRecipe] = useState(null);
 
   // Handle Web Share Target incoming data
   useEffect(() => {
@@ -987,6 +988,38 @@ function RecipeBook() {
     }
   }
 
+  // Add a recipe straight to the meal plan calendar from anywhere it's shown
+  // (recipe detail view, library card) without going through the Calendar tab.
+  async function addToMealPlan(recipeId, dateKey, slot, servings, leftoverSlot, leftoverDays) {
+    function getArr(d, dk, s) { const e = d[dk]?.[s]; if (!e) return []; return Array.isArray(e) ? e : [e]; }
+    const cal = loadCalendar();
+    const arr = getArr(cal, dateKey, slot);
+    if (!arr.some(e => e.id === recipeId)) {
+      cal[dateKey] = { ...(cal[dateKey] || {}), [slot]: [...arr, { id: recipeId, servings, leftover: false }] };
+    }
+    if (leftoverSlot && leftoverDays > 0) {
+      for (let i = 1; i <= leftoverDays; i++) {
+        const lk = addDays(dateKey, i);
+        const larr = getArr(cal, lk, leftoverSlot);
+        if (!larr.some(e => e.id === recipeId)) {
+          cal[lk] = { ...(cal[lk] || {}), [leftoverSlot]: [...larr, { id: recipeId, servings, leftover: true }] };
+        }
+      }
+    }
+    saveCalendar(cal);
+    setCalVersion(v => v + 1);
+    setPlanRecipe(null);
+
+    const prefs = loadSyncPrefs();
+    if (prefs.enabled) {
+      try {
+        let pantryData = [];
+        try { pantryData = JSON.parse(localStorage.getItem(PANTRY_KEY) || "[]"); } catch {}
+        await syncToSupabase([], pantryData, cal);
+      } catch (e) { console.warn("Calendar sync failed:", e); }
+    }
+  }
+
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
   const allDiets = [...new Set(recipes.flatMap(r=>r.diets||[]))];
@@ -1050,7 +1083,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
@@ -1098,12 +1131,13 @@ function RecipeBook() {
         recipes={data.recipes||[]}
       />}
       {lightbox && <Lightbox photos={lightbox.photos||[lightbox.src||lightbox]} startIndex={lightbox.index||0} onClose={()=>setLightbox(null)} />}
+      {planRecipe && <AddToPlanModal recipe={planRecipe} onAssign={(dateKey,slot,servings,leftoverSlot,leftoverDays)=>addToMealPlan(planRecipe.id,dateKey,slot,servings,leftoverSlot,leftoverDays)} onClose={()=>setPlanRecipe(null)} />}
     </>
   );
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan}) {
   const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
@@ -1134,7 +1168,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <button className={`fav-filter-btn${hideQuickAdd?" active":""}`} title="Hide quick-add meals" onClick={()=>setHideQuickAdd(h=>!h)}>⚡️🚫</button>
       </div>
       {selectedRecipe ? (
-        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} onQuickPhoto={onQuickPhoto} />
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} />
       ) : recipes.length===0 ? (
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
@@ -1181,7 +1215,10 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
               <div className="recipe-card-body">
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
                   <div className="recipe-card-title">{r.title}</div>
-                  <button className="fav-btn" onClick={e=>{e.stopPropagation();onToggleFavorite(r.id);}}>{r.favorite?"❤️":"🤍"}</button>
+                  <div style={{display:'flex',gap:4,flexShrink:0}}>
+                    <button className="fav-btn" title="Add to Meal Plan" onClick={e=>{e.stopPropagation();onAddToPlan(r);}}>📅</button>
+                    <button className="fav-btn" onClick={e=>{e.stopPropagation();onToggleFavorite(r.id);}}>{r.favorite?"❤️":"🤍"}</button>
+                  </div>
                 </div>
                 <div className="recipe-card-meta">
                   {(r.categories||[]).map(c=><span key={c} style={{background:'var(--saffron)',color:'white',padding:'1px 7px',borderRadius:2,fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px'}}>{c}</span>)}
@@ -1231,7 +1268,7 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
   );
 }
 
-function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite,onQuickPhoto}) {
+function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite,onQuickPhoto,onAddToPlan}) {
   const safe = normalizeRecipe({...recipe});
     const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
@@ -1261,6 +1298,7 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
           📷
         </label>
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onEdit(safe)}>Edit</button>
+        <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onAddToPlan(safe)}>📅 Plan</button>
         <button className="recipe-action-btn recipe-action-btn-cook" onClick={()=>onCook(safe)}>▶ Cook</button>
         <button className="recipe-action-btn recipe-action-btn-danger" onClick={()=>onDelete(safe.id)}>🗑</button>
       </div>
@@ -1369,7 +1407,71 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
   }
 }
 
-// ── Ingredient amount parser (for cook mode display) ─────────────────────
+// ── Add to Meal Plan (quick-add from recipe view) ─────────────────────────
+function AddToPlanModal({ recipe, onAssign, onClose }) {
+  const [dateKey, setDateKey] = useState(todayKey());
+  const [slot, setSlot] = useState("dinner");
+  const [servings, setServings] = useState(recipe?.servings || 1);
+  const [hasLeftovers, setHasLeftovers] = useState(false);
+  const [leftoverSlot, setLeftoverSlot] = useState("lunch");
+  const [leftoverDays, setLeftoverDays] = useState(2);
+
+  if (!recipe) return null;
+  const dateLabel = new Date(dateKey+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal" style={{maxWidth:420}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">📅 Add to Meal Plan</div>
+        <p style={{fontSize:14,color:"var(--ink-mid)",marginBottom:16}}>Planning <strong>{recipe.title}</strong></p>
+        <div className="form-group">
+          <label className="form-label">Date</label>
+          <input type="date" className="form-input" value={dateKey} onChange={e=>setDateKey(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Meal</label>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {MEAL_SLOTS.map(s=><button key={s} className={`btn btn-sm ${slot===s?"btn-primary":"btn-outline"}`} onClick={()=>setSlot(s)}>{MEAL_LABELS[s]}</button>)}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Servings</label>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button className="scaler-btn" onClick={()=>setServings(s=>Math.max(0.25,s-0.25))}>−</button>
+            <span style={{fontFamily:"'Special Elite',monospace",fontSize:20,minWidth:36,textAlign:"center"}}>{servings}</span>
+            <button className="scaler-btn" onClick={()=>setServings(s=>s+0.25)}>+</button>
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label" style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",textTransform:"none",letterSpacing:0}}>
+            <input type="checkbox" checked={hasLeftovers} onChange={e=>setHasLeftovers(e.target.checked)} />
+            Plan leftovers too
+          </label>
+        </div>
+        {hasLeftovers&&(
+          <div style={{background:"var(--parchment-dark)",borderRadius:6,padding:16,marginBottom:16}}>
+            <div className="form-group">
+              <label className="form-label">Which meal for leftovers?</label>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {MEAL_SLOTS.map(s=><button key={s} className={`btn btn-sm ${leftoverSlot===s?"btn-primary":"btn-outline"}`} onClick={()=>setLeftoverSlot(s)}>{MEAL_LABELS[s].split(" ")[1]}</button>)}
+              </div>
+            </div>
+            <div className="form-group" style={{marginBottom:0}}>
+              <label className="form-label">How many days?</label>
+              <div style={{display:"flex",gap:8}}>
+                {[1,2,3,4,5].map(n=><button key={n} className={`btn btn-sm ${leftoverDays===n?"btn-primary":"btn-outline"}`} onClick={()=>setLeftoverDays(n)}>{n}</button>)}
+              </div>
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",gap:8}}>
+          <button className="btn btn-primary" onClick={()=>onAssign(dateKey,slot,servings,hasLeftovers?leftoverSlot:null,hasLeftovers?leftoverDays:0)}>Add to {dateLabel}</button>
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function parseIngAmount(ing) {
   if (!ing || typeof ing !== "string") return { amount: "", name: ing || "" };
   const frac = {"½":"1/2","⅓":"1/3","⅔":"2/3","¼":"1/4","¾":"3/4","⅛":"1/8"};
