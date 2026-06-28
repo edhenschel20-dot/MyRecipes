@@ -688,7 +688,7 @@ function GitHubSettingsModal({ onClose, onSaved, recipes }) {
             } catch(e) { setStatus("err:Migration failed: " + e.message); }
             setSyncing(false);
           }} disabled={syncing}>📸 Migrate Photos</button>
-          <button className="btn btn-ghost" onClick={async()=>{ setSyncing(true); setStatus("ok:Loading from Supabase..."); try { const sbData = await loadFromSupabase(); if(sbData){ if(sbData.recipes&&sbData.recipes.length>0){ localStorage.setItem("recipebook_v3", JSON.stringify({recipes:sbData.recipes})); } if(sbData.pantry&&sbData.pantry.length>0){ localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry)); } if(sbData.calendar&&Object.keys(sbData.calendar).length>0){ localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar)); } if(sbData.ingredientSubs&&Object.keys(sbData.ingredientSubs).length>0){ saveIngredientSubs(sbData.ingredientSubs); } setStatus("ok:✓ Pulled " + (sbData.recipes||[]).length + " recipes from cloud!"); setTimeout(()=>window.location.reload(), 1000); } } catch(e){ setStatus("err:Pull failed: "+e.message); } setSyncing(false); }}>↓ Pull from Cloud</button>
+          <button className="btn btn-ghost" onClick={async()=>{ setSyncing(true); setStatus("ok:Loading from Supabase..."); try { const sbData = await loadFromSupabase(); if(sbData){ if(sbData.recipes&&sbData.recipes.length>0){ localStorage.setItem("recipebook_v3", JSON.stringify({recipes:sbData.recipes})); } if(sbData.pantry&&sbData.pantry.length>0){ localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry)); } if(sbData.calendar&&Object.keys(sbData.calendar).length>0){ let localCal={}; try{ localCal=JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); }catch{} localStorage.setItem(CAL_KEY, JSON.stringify({...localCal, ...sbData.calendar})); } if(sbData.ingredientSubs&&Object.keys(sbData.ingredientSubs).length>0){ saveIngredientSubs(sbData.ingredientSubs); } setStatus("ok:✓ Pulled " + (sbData.recipes||[]).length + " recipes from cloud!"); setTimeout(()=>window.location.reload(), 1000); } } catch(e){ setStatus("err:Pull failed: "+e.message); } setSyncing(false); }}>↓ Pull from Cloud</button>
           <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
@@ -922,7 +922,14 @@ function RecipeBook() {
             setPantryVersion(v=>v+1);
           }
           if (sbData.calendar && Object.keys(sbData.calendar).length > 0) {
-            localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar));
+            // Merge rather than overwrite: cloud wins per-date where both exist,
+            // but local-only dates not present in the cloud snapshot are kept.
+            // Protects against exactly the bug that just bit Ed/Sue — a stale
+            // or partially-synced cloud calendar wiping out newer local entries.
+            let localCal = {};
+            try { localCal = JSON.parse(localStorage.getItem(CAL_KEY)||"{}"); } catch {}
+            const merged = { ...localCal, ...sbData.calendar };
+            localStorage.setItem(CAL_KEY, JSON.stringify(merged));
             setCalVersion(v=>v+1);
           }
           if (sbData.ingredientSubs && Object.keys(sbData.ingredientSubs).length > 0) {
@@ -4209,9 +4216,23 @@ function CalendarTab({ recipes, version, onQuickAddRecipe }) {
   const [viewMode, setViewMode] = useState("month"); // "month" | "week"
   const [selectedDay, setSelectedDay] = useState(null);
   const [assignModal, setAssignModal] = useState(null);
+  const calMounted = useRef(false);
 
+  // Saves locally immediately, then pushes to Supabase too (if sync is on)
+  // so meals added/removed/edited right here in the Calendar tab actually
+  // make it to the cloud, instead of relying on some other action (editing
+  // pantry, quick-adding from a recipe) to incidentally carry calendar data
+  // along. Without this, a later Supabase pull can overwrite local changes
+  // with a stale cloud snapshot that never had them.
   useEffect(()=>{
     saveCalendar(calData);
+    if (!calMounted.current) { calMounted.current = true; return; }
+    const prefs = loadSyncPrefs();
+    if (prefs.enabled) {
+      let pantryData = [];
+      try { pantryData = JSON.parse(localStorage.getItem(PANTRY_KEY)||"[]"); } catch {}
+      syncToSupabase([], pantryData, calData).catch(e=>console.warn("Calendar sync failed:", e));
+    }
   },[calData]);
 
   function getSlotArr(d,dk,slot) {
