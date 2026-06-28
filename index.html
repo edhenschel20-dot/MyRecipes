@@ -3230,6 +3230,81 @@ function scanForAutoDeductMatches(calendar, recipes, pantryItems) {
 // need no new shopping. Scale per entry is entry.servings / recipe.servings,
 // so planning a half-batch or double-batch via the servings field on a
 // calendar entry scales ingredients accordingly.
+// Common grocery package sizes for shelf-stable/dairy/packaged items, used to
+// round "amount needed" up to "how many of what you'd actually buy". Weight
+// items convert via WEIGHT_TO_OZ; liquid items convert via LIQUID_TO_FLOZ
+// (treats fl oz ≈ oz, a fine approximation for water-based liquids like broth
+// or milk, but NOT valid for things like flour/sugar, which is why this table
+// intentionally skips dry goods normally measured by volume). Count items
+// (currently just eggs) compare directly against the parsed amount since no
+// unit conversion is needed. Order matters: more specific keywords (e.g.
+// "tomato paste") are listed before anything that could collide with a more
+// generic term, so the first matching entry wins.
+const WEIGHT_TO_OZ = { ounce:1, pound:16, gram:0.0352740, kilogram:35.2740 };
+const LIQUID_TO_FLOZ = { ounce:1, cup:8, tablespoon:0.5, teaspoon:1/6, milliliter:0.033814, liter:33.814 };
+const PACKAGE_SIZES = [
+  { keywords:["cream cheese"], kind:"weight", amount:8, label:"8 oz block" },
+  { keywords:["sour cream"], kind:"weight", amount:16, label:"16 oz tub" },
+  { keywords:["ricotta"], kind:"weight", amount:15, label:"15 oz tub" },
+  { keywords:["mozzarella"], kind:"weight", amount:8, label:"8 oz bag" },
+  { keywords:["cheddar"], kind:"weight", amount:8, label:"8 oz block" },
+  { keywords:["provolone"], kind:"weight", amount:8, label:"8 oz package" },
+  { keywords:["gruyere","gruyère"], kind:"weight", amount:8, label:"8 oz block" },
+  { keywords:["parmesan","pecorino","romano"], kind:"weight", amount:5, label:"5 oz container" },
+  { keywords:["bacon"], kind:"weight", amount:16, label:"16 oz package" },
+  { keywords:["pancetta"], kind:"weight", amount:8, label:"8 oz package" },
+  { keywords:["guanciale"], kind:"weight", amount:8, label:"8 oz package" },
+  { keywords:["tomato paste"], kind:"weight", amount:6, label:"6 oz can" },
+  { keywords:["tomato sauce"], kind:"weight", amount:15, label:"15 oz can" },
+  { keywords:["tomato puree"], kind:"weight", amount:15, label:"15 oz can" },
+  { keywords:["diced tomato","crushed tomato","whole tomato","canned tomato"], kind:"weight", amount:14.5, label:"14.5 oz can" },
+  { keywords:["spaghetti","penne","fettuccine","linguine","rigatoni","rotini","macaroni","bucatini","orzo"], kind:"weight", amount:16, label:"16 oz box" },
+  { keywords:["panko","breadcrumb"], kind:"weight", amount:8, label:"8 oz canister" },
+  { keywords:["chicken broth","chicken stock"], kind:"liquid", amount:32, label:"32 oz carton" },
+  { keywords:["beef broth","beef stock"], kind:"liquid", amount:32, label:"32 oz carton" },
+  { keywords:["vegetable broth","vegetable stock"], kind:"liquid", amount:32, label:"32 oz carton" },
+  { keywords:["heavy cream"], kind:"liquid", amount:16, label:"16 oz carton" },
+  { keywords:["half and half","half-and-half"], kind:"liquid", amount:16, label:"16 oz carton" },
+  { keywords:["milk"], kind:"liquid", amount:16, label:"16 oz (pint)" },
+  { keywords:["egg"], kind:"count", amount:12, label:"dozen" },
+];
+
+function findPackageMatch(ingredientName) {
+  const lower = (ingredientName||"").toLowerCase();
+  for (const entry of PACKAGE_SIZES) {
+    if (entry.keywords.some(k=>lower.includes(k))) return entry;
+  }
+  return null;
+}
+
+function formatPackageCount(count, label) {
+  if (label === "dozen") return `${count} dozen`;
+  return `${count} × ${label}${count>1?"s":""}`;
+}
+
+// Builds the display string for one summed ingredient need. When usePackages
+// is on and a package-size match exists, shows "N × package size" alongside
+// the raw recipe amount; otherwise (or with packages off) falls back to the
+// plain scaled amount, exactly as before.
+function formatNeedQty(need, usePackages) {
+  if (!need.hasAmount) return "";
+  const raw = `${formatAmount(need.totalAmount,1,need.unitKey)}${need.unitDisplay?" "+need.unitDisplay:""}`.trim();
+  if (!usePackages) return raw;
+  const pkg = findPackageMatch(need.name);
+  if (!pkg) return raw;
+  let neededBase = null;
+  if (pkg.kind === "weight" && WEIGHT_TO_OZ[need.unitKey] != null) {
+    neededBase = need.totalAmount * WEIGHT_TO_OZ[need.unitKey];
+  } else if (pkg.kind === "liquid" && LIQUID_TO_FLOZ[need.unitKey] != null) {
+    neededBase = need.totalAmount * LIQUID_TO_FLOZ[need.unitKey];
+  } else if (pkg.kind === "count" && !need.unitKey) {
+    neededBase = need.totalAmount;
+  }
+  if (neededBase == null) return raw;
+  const count = Math.max(1, Math.ceil(neededBase / pkg.amount - 1e-9));
+  return `${formatPackageCount(count, pkg.label)} (recipe needs ${raw})`;
+}
+
 function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
   const needs = {};
   for (const [date, slots] of Object.entries(calendar||{})) {
@@ -3265,7 +3340,7 @@ function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
 // in the given date range (skipped entirely if pantry already shows "have"
 // for a fuzzy-matched item, since current stock is assumed to cover it),
 // merged with the existing low/out restock list so nothing is duplicated.
-function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd) {
+function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd, usePackages) {
   const restock = pantryItems.filter(i=>i.status==="low"||i.status==="out");
   if (!rangeStart || !rangeEnd) {
     return restock.map(i=>({...i, mealQty:null, mealRecipes:null}));
@@ -3275,7 +3350,7 @@ function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd)
   const mealItems = [];
   for (const need of needs) {
     const match = pantryItems.find(p => fuzzyIngredientMatch(need.name, p.name));
-    const qtyStr = need.hasAmount ? `${formatAmount(need.totalAmount,1,need.unitKey)}${need.unitDisplay?" "+need.unitDisplay:""}`.trim() : "";
+    const qtyStr = formatNeedQty(need, usePackages);
     const recipeList = [...need.recipeNames].join(", ");
     if (match) {
       if (match.status === "have") continue; // assume current stock covers it
@@ -3313,6 +3388,7 @@ function PantryTab({ recipes, version }) {
   const [showReview, setShowReview] = useState(false);
   const [mealRangeStart, setMealRangeStart] = useState("");
   const [mealRangeEnd, setMealRangeEnd] = useState("");
+  const [usePackages, setUsePackages] = useState(true);
 
   // Re-scan for auto-deduct matches every time the Pantry tab mounts/loads.
   useEffect(()=>{
@@ -3366,8 +3442,8 @@ function PantryTab({ recipes, version }) {
 
   const restockCount = items.filter(i=>i.status==="low"||i.status==="out").length;
   const shoppingList = useMemo(
-    () => buildShoppingList(items, loadCalendar(), recipes||[], mealRangeStart, mealRangeEnd),
-    [items, recipes, mealRangeStart, mealRangeEnd, version]
+    () => buildShoppingList(items, loadCalendar(), recipes||[], mealRangeStart, mealRangeEnd, usePackages),
+    [items, recipes, mealRangeStart, mealRangeEnd, usePackages, version]
   );
   const usedCats = [...new Set(filtered.map(i=>i.category||"Other"))].sort();
 
@@ -3426,6 +3502,12 @@ function PantryTab({ recipes, version }) {
             <input type="date" className="form-input" style={{maxWidth:150}} value={mealRangeEnd} onChange={e=>setMealRangeEnd(e.target.value)} />
             <button className="btn btn-outline btn-sm" onClick={()=>{ const s=todayKey(); setMealRangeStart(s); setMealRangeEnd(addDays(s,6)); }}>Next 7 days</button>
             {(mealRangeStart||mealRangeEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setMealRangeStart("");setMealRangeEnd("");}}>Clear</button>}
+            {(mealRangeStart&&mealRangeEnd) && (
+              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,fontWeight:600,cursor:"pointer",marginLeft:4}}>
+                <input type="checkbox" checked={usePackages} onChange={e=>setUsePackages(e.target.checked)} style={{width:16,height:16}} />
+                Round to package sizes
+              </label>
+            )}
           </div>
           <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} />
         </>
