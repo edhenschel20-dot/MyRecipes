@@ -1126,6 +1126,22 @@ function RecipeBook() {
     return all;
   }
 
+  // Single entry point for "cook this meal" wherever it's triggered from
+  // (Calendar tab included): one recipe in the slot goes straight into the
+  // normal single-recipe cook mode; two or more route into the same
+  // interleaved, color-coded multi-recipe cook mode the Dinner Planner tab
+  // uses, so a full dinner planned on the calendar gets the same combined
+  // walkthrough without having to re-pick the recipes over there.
+  function startMealCook(recipeIds) {
+    const validIds = (recipeIds||[]).filter(id => recipes.find(r=>r.id===id));
+    if (validIds.length === 0) { alert("No cookable recipes in this meal yet."); return; }
+    if (validIds.length === 1) {
+      startCookMode(recipes.find(r=>r.id===validIds[0]));
+    } else {
+      setDinnerCookMode({ steps: buildDinnerSteps(validIds), currentIndex: 0 });
+    }
+  }
+
   return (
     <>
       <style>{STYLES}</style>
@@ -1168,7 +1184,7 @@ function RecipeBook() {
           upsertRecipe(r); setEditRecipe(r); setTab("library");
         }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
-        {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} />}
+        {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} onStartMealCook={startMealCook} />}
         {tab==="foodlog" && <FoodLogTab recipes={recipes} />}
       </div>
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{
@@ -4282,7 +4298,7 @@ function CalorieBar({ consumed, goal }) {
   );
 }
 
-function CalendarTab({ recipes, version, onQuickAddRecipe }) {
+function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
   const [calData, setCalData] = useState(()=>loadCalendar());
   useEffect(()=>{ if(version>0) setCalData(loadCalendar()); },[version]);
   const today = new Date();
@@ -4422,7 +4438,10 @@ function CalendarTab({ recipes, version, onQuickAddRecipe }) {
                     </span>
                     {slotEntries.length===0&&<span style={{fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>Nothing planned</span>}
                   </div>
-                  <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:dk,slot})}>+ Add</button>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    {slotEntries.length>0 && <button className="btn btn-sm btn-outline" style={{fontSize:11}} title="Start cook mode for everything in this slot" onClick={()=>onStartMealCook(slotEntries.map(e=>e.id))}>👨‍🍳 Cook</button>}
+                    <button className="btn btn-sm btn-outline" style={{fontSize:11}} onClick={()=>setAssignModal({dateKey:dk,slot})}>+ Add</button>
+                  </div>
                 </div>
                 {/* Each recipe in slot */}
                 {slotEntries.map((entry,ei)=>{
@@ -4474,8 +4493,14 @@ function CalendarTab({ recipes, version, onQuickAddRecipe }) {
           <span style={{fontSize:20}}>🌙</span>
           <div style={{flex:1}}>
             <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,opacity:0.85}}>Tonight's Dinner</div>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700}}>{tonightRecipe.title}{tonightDinner.leftover&&" ↩"}</div>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700}}>
+              {tonightDinnerArr.map((entry,i)=>{
+                const r = recipes.find(rec=>rec.id===entry.id);
+                return <span key={entry.id||i}>{i>0&&", "}{r?r.title:"Recipe"}{entry.leftover&&" ↩"}</span>;
+              })}
+            </div>
           </div>
+          <button className="btn btn-sm" style={{fontSize:12,background:"white",color:"var(--saffron)",border:"none",fontWeight:700,flexShrink:0}} onClick={()=>onStartMealCook(tonightDinnerArr.map(e=>e.id))}>👨‍🍳 Cook</button>
         </div>
       )}
 
