@@ -583,8 +583,8 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
 }
 
 async function loadFromSupabase() {
-  const [recipeRows, pantryRows, calRows] = await Promise.all([
-    sbGet("recipes"), sbGet("pantry"), sbGet("calendar")
+  const [recipeRows, pantryRows, calRows, subRows] = await Promise.all([
+    sbGet("recipes"), sbGet("pantry"), sbGet("calendar"), sbGet("ingredient_subs").catch(()=>[])
   ]);
   const recipes = recipeRows.map(rowToRecipe);
   const pantry = pantryRows.map(p => ({ ...p, autoDeduct: !!p.auto_deduct }));
@@ -594,7 +594,9 @@ async function loadFromSupabase() {
     if (!calendar[row.date][row.slot]) calendar[row.date][row.slot] = [];
     calendar[row.date][row.slot].push({ id: row.recipe_id, servings: row.servings, leftover: row.leftover });
   }
-  return { recipes, pantry, calendar };
+  const ingredientSubs = {};
+  (subRows||[]).forEach(r => { if (r && r.key && r.pantry_item_id) ingredientSubs[r.key] = r.pantry_item_id; });
+  return { recipes, pantry, calendar, ingredientSubs };
 }
 
 // ── Sync Settings Modal ──────────────────────────────────────────────────────
@@ -686,7 +688,7 @@ function GitHubSettingsModal({ onClose, onSaved, recipes }) {
             } catch(e) { setStatus("err:Migration failed: " + e.message); }
             setSyncing(false);
           }} disabled={syncing}>📸 Migrate Photos</button>
-          <button className="btn btn-ghost" onClick={async()=>{ setSyncing(true); setStatus("ok:Loading from Supabase..."); try { const sbData = await loadFromSupabase(); if(sbData){ if(sbData.recipes&&sbData.recipes.length>0){ localStorage.setItem("recipebook_v3", JSON.stringify({recipes:sbData.recipes})); } if(sbData.pantry&&sbData.pantry.length>0){ localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry)); } if(sbData.calendar&&Object.keys(sbData.calendar).length>0){ localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar)); } setStatus("ok:✓ Pulled " + (sbData.recipes||[]).length + " recipes from cloud!"); setTimeout(()=>window.location.reload(), 1000); } } catch(e){ setStatus("err:Pull failed: "+e.message); } setSyncing(false); }}>↓ Pull from Cloud</button>
+          <button className="btn btn-ghost" onClick={async()=>{ setSyncing(true); setStatus("ok:Loading from Supabase..."); try { const sbData = await loadFromSupabase(); if(sbData){ if(sbData.recipes&&sbData.recipes.length>0){ localStorage.setItem("recipebook_v3", JSON.stringify({recipes:sbData.recipes})); } if(sbData.pantry&&sbData.pantry.length>0){ localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry)); } if(sbData.calendar&&Object.keys(sbData.calendar).length>0){ localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar)); } if(sbData.ingredientSubs&&Object.keys(sbData.ingredientSubs).length>0){ saveIngredientSubs(sbData.ingredientSubs); } setStatus("ok:✓ Pulled " + (sbData.recipes||[]).length + " recipes from cloud!"); setTimeout(()=>window.location.reload(), 1000); } } catch(e){ setStatus("err:Pull failed: "+e.message); } setSyncing(false); }}>↓ Pull from Cloud</button>
           <button className="btn btn-ghost" onClick={disconnect}>Disconnect</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
@@ -922,6 +924,10 @@ function RecipeBook() {
           if (sbData.calendar && Object.keys(sbData.calendar).length > 0) {
             localStorage.setItem(CAL_KEY, JSON.stringify(sbData.calendar));
             setCalVersion(v=>v+1);
+          }
+          if (sbData.ingredientSubs && Object.keys(sbData.ingredientSubs).length > 0) {
+            saveIngredientSubs(sbData.ingredientSubs);
+            setPantryVersion(v=>v+1);
           }
         }
         setSyncStatus("ok");
@@ -3467,6 +3473,7 @@ function PantryTab({ recipes, version }) {
   const [mealRangeEnd, setMealRangeEnd] = useState("");
   const [usePackages, setUsePackages] = useState(true);
   const [ingredientSubs, setIngredientSubsState] = useState(()=>loadIngredientSubs());
+  useEffect(()=>{ if(version>0) setIngredientSubsState(loadIngredientSubs()); },[version]);
   function setSubstitution(key, pantryItemId) {
     setIngredientSubsState(prev => {
       const next = { ...prev };
@@ -3474,6 +3481,14 @@ function PantryTab({ recipes, version }) {
       saveIngredientSubs(next);
       return next;
     });
+    const prefs = loadSyncPrefs();
+    if (prefs.enabled) {
+      if (pantryItemId) {
+        sbUpsert("ingredient_subs", [{ key, pantry_item_id: pantryItemId, updated_at: new Date().toISOString() }]).catch(()=>{});
+      } else {
+        fetch(`${SUPABASE_URL}/rest/v1/ingredient_subs?key=eq.${encodeURIComponent(key)}`, { method:"DELETE", headers: sbHeaders() }).catch(()=>{});
+      }
+    }
   }
 
   // Re-scan for auto-deduct matches every time the Pantry tab mounts/loads.
