@@ -351,7 +351,7 @@ function PhotoUpload({ photos, onChange }) {
 
 // ── Ingredient scaling helpers ─────────────────────────────────────────────
 const UNIT_ALIASES = {
-  tablespoon:["tbsp","tablespoon","tablespoons","T"],
+  tablespoon:["tbsp","tbs","tablespoon","tablespoons","T"],
   teaspoon:["tsp","teaspoon","teaspoons","t"],
   cup:["cup","cups","c"],
   ounce:["oz","ounce","ounces"],
@@ -3305,6 +3305,29 @@ function formatNeedQty(need, usePackages) {
   return `${formatPackageCount(count, pkg.label)} (recipe needs ${raw})`;
 }
 
+// Strips prep/state notes that don't change what you'd actually buy —
+// parenthetical asides like "(softened)" or "(to taste)", and anything after
+// the first comma like ", divided" or ", sliced into rounds" — so
+// "Butter, divided" / "Butter (softened)" / "Butter (extra)" all collapse to
+// the same shopping item instead of listing three separate "butters". Only
+// strips comma/paren content; descriptors with no comma or parens (like
+// "Black pepper" vs "White pepper") are left alone since those usually do
+// change what you buy.
+function shoppingBaseName(name) {
+  let s = (name||"").replace(/\([^)]*\)/g, "").trim();
+  const commaIdx = s.indexOf(",");
+  if (commaIdx > 0) s = s.slice(0, commaIdx).trim();
+  return s || (name||"").trim();
+}
+
+// Sums ingredient amounts (scaled by servings) across every non-leftover
+// calendar entry in [startDate, endDate], grouped by a cleaned shopping name
+// + unit. Leftover entries are skipped since they reuse an already-cooked
+// batch and need no new shopping. Scale per entry is entry.servings /
+// recipe.servings, so planning a half-batch or double-batch via the servings
+// field on a calendar entry scales ingredients accordingly. Each need also
+// keeps a byRecipe breakdown (recipe name -> amount contributed) so the
+// merged total can still show where each portion is going, for planning.
 function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
   const needs = {};
   for (const [date, slots] of Object.entries(calendar||{})) {
@@ -3317,23 +3340,39 @@ function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
         if (!recipe || !recipe.ingredients) continue;
         const recipeServings = recipe.servings || 1;
         const scale = (entry.servings || recipeServings) / recipeServings;
+        const recipeName = recipe.title || recipe.name || "Recipe";
         for (const ingStr of recipe.ingredients) {
           const parsed = parseIngredient(ingStr);
           if (!parsed.name) continue;
-          const groupKey = normalizeWords(parsed.name).join(" ") + "|" + (parsed.unitKey||"");
+          const cleanName = shoppingBaseName(parsed.name);
+          if (!cleanName) continue;
+          const groupKey = normalizeWords(cleanName).join(" ") + "|" + (parsed.unitKey||"");
           if (!needs[groupKey]) {
-            needs[groupKey] = { name: parsed.name, unitKey: parsed.unitKey, unitDisplay: parsed.unitDisplay, totalAmount: 0, hasAmount: false, recipeNames: new Set() };
+            needs[groupKey] = { name: cleanName, unitKey: parsed.unitKey, unitDisplay: parsed.unitDisplay, totalAmount: 0, hasAmount: false, byRecipe: new Map() };
           }
-          if (parsed.amount !== null) {
-            needs[groupKey].totalAmount += parsed.amount * scale;
+          const scaledAmt = parsed.amount !== null ? parsed.amount * scale : null;
+          if (scaledAmt !== null) {
+            needs[groupKey].totalAmount += scaledAmt;
             needs[groupKey].hasAmount = true;
           }
-          needs[groupKey].recipeNames.add(recipe.title || recipe.name || "Recipe");
+          needs[groupKey].byRecipe.set(recipeName, (needs[groupKey].byRecipe.get(recipeName)||0) + (scaledAmt||0));
         }
       }
     }
   }
   return Object.values(needs);
+}
+
+// Renders the "for X (amount), Y (amount)" breakdown of a merged need, so
+// Ed can still see how much of the combined total goes to each recipe.
+function formatNeedBreakdown(need) {
+  return [...need.byRecipe.entries()].map(([recipeName, amt]) => {
+    if (need.hasAmount && amt > 0) {
+      const amtStr = `${formatAmount(amt,1,need.unitKey)}${need.unitDisplay?" "+need.unitDisplay:""}`.trim();
+      return `${recipeName} (${amtStr})`;
+    }
+    return recipeName;
+  }).join(", ");
 }
 
 // Builds the full Shopping tab list: items needed for calendar-planned meals
@@ -3351,7 +3390,7 @@ function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd,
   for (const need of needs) {
     const match = pantryItems.find(p => fuzzyIngredientMatch(need.name, p.name));
     const qtyStr = formatNeedQty(need, usePackages);
-    const recipeList = [...need.recipeNames].join(", ");
+    const recipeList = formatNeedBreakdown(need);
     if (match) {
       if (match.status === "have") continue; // assume current stock covers it
       usedPantryIds.add(match.id);
