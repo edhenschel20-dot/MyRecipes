@@ -544,6 +544,14 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
       count: p.count || "",
       notes: p.notes || "",
       auto_deduct: !!p.autoDeduct,
+      serving_size: p.servingSize || "",
+      servings_per_container: (p.servingsPerContainer!=null && p.servingsPerContainer!=="") ? Number(p.servingsPerContainer) : null,
+      calories: (p.calories!=null && p.calories!=="") ? Number(p.calories) : null,
+      protein: (p.protein!=null && p.protein!=="") ? Number(p.protein) : null,
+      carbs: (p.carbs!=null && p.carbs!=="") ? Number(p.carbs) : null,
+      fat: (p.fat!=null && p.fat!=="") ? Number(p.fat) : null,
+      fiber: (p.fiber!=null && p.fiber!=="") ? Number(p.fiber) : null,
+      sodium: (p.sodium!=null && p.sodium!=="") ? Number(p.sodium) : null,
       updated_at: new Date().toISOString()
     }));
     await sbUpsert("pantry", rows);
@@ -587,7 +595,7 @@ async function loadFromSupabase() {
     sbGet("recipes"), sbGet("pantry"), sbGet("calendar"), sbGet("ingredient_subs").catch(()=>[])
   ]);
   const recipes = recipeRows.map(rowToRecipe);
-  const pantry = pantryRows.map(p => ({ ...p, autoDeduct: !!p.auto_deduct }));
+  const pantry = pantryRows.map(p => ({ ...p, autoDeduct: !!p.auto_deduct, servingSize: p.serving_size||"", servingsPerContainer: p.servings_per_container ?? "" }));
   const calendar = {};
   for (const row of calRows) {
     if (!calendar[row.date]) calendar[row.date] = {};
@@ -3660,6 +3668,7 @@ function PantryTab({ recipes, version }) {
                             <div style={{flex:1}}>
                               <div style={{fontWeight:600,fontSize:14,marginBottom:2}}>{item.name}</div>
                               {pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>}
+                              {(item.calories||item.servingSize)&&<div style={{fontSize:11,color:"var(--ink-light)"}}>{item.servingSize?`${item.servingSize}`:""}{item.servingSize&&item.calories?" · ":""}{item.calories?`${item.calories} cal`:""}</div>}
                               {item.notes&&<div style={{fontSize:12,color:"var(--ink-light)",fontStyle:"italic"}}>{item.notes}</div>}
                             </div>
                             <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -3972,20 +3981,64 @@ function PantryPhotoImport({ existingItems, onSave, onClose }) {
   );
 }
 
+// Estimates nutrition for a pantry item via the same claude-sync edge
+// function used elsewhere, but tailored to packaged/grocery items: asks for
+// a label-style serving size and per-serving facts, using real values for a
+// recognizable commercial product (e.g. a specific frozen pizza brand) when
+// possible, or a reasonable typical estimate otherwise.
+async function estimatePantryNutrition(itemName, notes) {
+  try {
+    const subject = notes ? `${itemName} (${notes})` : itemName;
+    const prompt = `For the packaged grocery item "${subject}", estimate nutrition facts as they'd typically appear on the package label. If this is a recognizable commercial product, use realistic values for that specific product; otherwise give a reasonable typical estimate for that type of food. Return ONLY a JSON object, no markdown, no extra text, with these exact fields (numeric fields are plain numbers, no units): {"servingSize":"e.g. 1/3 pizza (130g)","servingsPerContainer":0,"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0,"sodium":0}`;
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "x-claude-secret": "henschel-claude-2026" },
+      body: JSON.stringify({ action: "ai", content: prompt, max_tokens: 250 })
+    });
+    const wrapper = await response.json();
+    if (wrapper.error) throw new Error(wrapper.error);
+    const text = (wrapper.data.content||[]).map(b=>b.text||"").join("");
+    const clean = text.replace(/```json|```/g,"").trim();
+    return JSON.parse(clean);
+  } catch {
+    return null;
+  }
+}
+
 function PantryItemModal({ item, onSave, onClose }) {
-  const blank = { id:pantryUid(), name:"", category:"Other", size:"", count:"", quantity:"", notes:"", status:"have", autoDeduct:false };
+  const blank = { id:pantryUid(), name:"", category:"Other", size:"", count:"", quantity:"", notes:"", status:"have", autoDeduct:false, servingSize:"", servingsPerContainer:"", calories:"", protein:"", carbs:"", fat:"", fiber:"", sodium:"" };
   const [form, setForm] = useState(()=>{
     if (!item) return blank;
     // Migrate legacy combined `quantity` into size/count the first time this item is edited.
     if ((!item.size && !item.count) && item.quantity) {
       const split = splitLegacyQuantity(item.quantity);
-      return { autoDeduct:false, ...item, size: split.size, count: split.count };
+      return { ...blank, ...item, size: split.size, count: split.count };
     }
-    return { autoDeduct:false, size:"", count:"", ...item };
+    return { ...blank, ...item };
   });
+  const [aiLoading, setAiLoading] = useState(false);
   function set(k,v) { setForm(f=>({...f,[k]:v})); }
   function save() { if(!form.name.trim()) return; onSave(form); }
   const isSpice = form.category === "Spices & Herbs";
+
+  async function aiFillNutrition() {
+    if (!form.name.trim()) { alert("Enter an item name first."); return; }
+    setAiLoading(true);
+    const est = await estimatePantryNutrition(form.name, form.notes);
+    setAiLoading(false);
+    if (!est) { alert("AI estimate failed — you can still fill these in by hand."); return; }
+    setForm(f=>({
+      ...f,
+      servingSize: est.servingSize || f.servingSize,
+      servingsPerContainer: est.servingsPerContainer ?? f.servingsPerContainer,
+      calories: est.calories ?? f.calories,
+      protein: est.protein ?? f.protein,
+      carbs: est.carbs ?? f.carbs,
+      fat: est.fat ?? f.fat,
+      fiber: est.fiber ?? f.fiber,
+      sodium: est.sodium ?? f.sodium
+    }));
+  }
 
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -4031,6 +4084,28 @@ function PantryItemModal({ item, onSave, onClose }) {
             <label htmlFor="autoDeductChk" className="form-label" style={{margin:0,cursor:"pointer"}}>Flag for review when used in a cooked meal</label>
           </div>
         )}
+
+        <div className="form-section">Nutrition <span style={{fontSize:11,fontWeight:400,textTransform:"none",letterSpacing:0,color:"var(--ink-light)"}}>per serving (optional)</span></div>
+        <div style={{marginBottom:12}}>
+          <button type="button" className="btn btn-outline" onClick={aiFillNutrition} disabled={aiLoading} style={{width:"100%"}}>
+            {aiLoading ? "⏳ Estimating…" : "✨ AI Fill (Serving Size & Nutrition)"}
+          </button>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label className="form-label">Serving Size</label><input className="form-input" value={form.servingSize} onChange={e=>set("servingSize",e.target.value)} placeholder="e.g. 1/3 pizza (130g)" /></div>
+          <div className="form-group"><label className="form-label">Servings / Container</label><input className="form-input" type="number" value={form.servingsPerContainer} onChange={e=>set("servingsPerContainer",e.target.value)} /></div>
+        </div>
+        <div className="form-row-3">
+          <div className="form-group"><label className="form-label">Calories</label><input className="form-input" type="number" value={form.calories} onChange={e=>set("calories",e.target.value)} placeholder="kcal" /></div>
+          <div className="form-group"><label className="form-label">Protein (g)</label><input className="form-input" type="number" value={form.protein} onChange={e=>set("protein",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Carbs (g)</label><input className="form-input" type="number" value={form.carbs} onChange={e=>set("carbs",e.target.value)} /></div>
+        </div>
+        <div className="form-row-3">
+          <div className="form-group"><label className="form-label">Fat (g)</label><input className="form-input" type="number" value={form.fat} onChange={e=>set("fat",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Fiber (g)</label><input className="form-input" type="number" value={form.fiber} onChange={e=>set("fiber",e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">Sodium (mg)</label><input className="form-input" type="number" value={form.sodium} onChange={e=>set("sodium",e.target.value)} /></div>
+        </div>
+
         <div className="flex gap-8 mt-16">
           <button className="btn btn-primary" onClick={save}>Save</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
