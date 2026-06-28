@@ -3170,6 +3170,16 @@ function wordSetHasClose(wordSet, word) {
   return false;
 }
 
+// Staple words where any variant is functionally interchangeable in a
+// recipe regardless of descriptor — "kosher salt", "sea salt", and "pink
+// Himalayan salt" all do the same job, so any pantry item mentioning the
+// word counts as a match even if the rest of the name shares nothing.
+// Deliberately NOT extended to e.g. "pepper" (ground pepper vs. bell pepper
+// are different ingredients) or "sugar" (brown vs. white aren't always
+// interchangeable) — those qualifiers can change what the ingredient
+// actually is, not just the brand/style.
+const INTERCHANGEABLE_STAPLE_WORDS = ["salt"];
+
 // Returns true if a pantry item name plausibly appears in an ingredient string.
 // Checks overlap in both directions and takes whichever ratio is more
 // favorable, since pantry names often carry extra descriptive words
@@ -3181,6 +3191,9 @@ function fuzzyIngredientMatch(ingredientStr, pantryName) {
   const ingWords = normalizeWords(ingredientStr);
   const nameWords = normalizeWords(pantryName);
   if (nameWords.length === 0 || ingWords.length === 0) return false;
+  for (const staple of INTERCHANGEABLE_STAPLE_WORDS) {
+    if (ingWords.includes(staple) && nameWords.includes(staple)) return true;
+  }
   const ingSet = new Set(ingWords);
   const nameSet = new Set(nameWords);
   const hitsInName = nameWords.filter(w=>wordSetHasClose(ingSet,w)).length;
