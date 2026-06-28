@@ -771,6 +771,54 @@ function loadData() {
 function saveData(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} }
 function uid() { return "r" + Math.random().toString(36).slice(2,9); }
 
+// Shared "quick add" helpers — used anywhere a meal/food item needs to be
+// added without a full recipe (calendar quick-add, food log, meal plan).
+async function estimateNutritionForFood(foodName) {
+  try {
+    const prompt = `Estimate typical nutrition for one serving of "${foodName}" as it would commonly be prepared at home. Return ONLY a JSON object, no markdown, no extra text, with these exact numeric fields (no units, just numbers, reasonable single-serving estimates): {"calories":0,"protein":0,"carbs":0,"fat":0}`;
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "x-claude-secret": "henschel-claude-2026"
+      },
+      body: JSON.stringify({ action: "ai", content: prompt, max_tokens: 200 })
+    });
+    const wrapper = await response.json();
+    if (wrapper.error) throw new Error(wrapper.error);
+    const text = (wrapper.data.content||[]).map(b=>b.text||"").join("");
+    const clean = text.replace(/```json|```/g,"").trim();
+    return JSON.parse(clean);
+  } catch {
+    return null; // estimate failed — fall back to letting the user type it in manually
+  }
+}
+
+function buildQuickRecipe(title, nutrition) {
+  return {
+    id: uid(),
+    title,
+    description: "",
+    cuisine: "American",
+    categories: ["Other"],
+    servings: 1,
+    prepTime: 0,
+    cookTime: 0,
+    tags: ["quick-add"],
+    diets: [],
+    calories: nutrition?.calories ?? null,
+    protein: nutrition?.protein ?? null,
+    carbs: nutrition?.carbs ?? null,
+    fat: nutrition?.fat ?? null,
+    ingredients: [title],
+    steps: [],
+    notes: nutrition ? "" : "Calories not estimated — edit this recipe to add nutrition info manually.",
+    isQuickAdd: true
+  };
+}
+
 // ── App ────────────────────────────────────────────────────────────────────
 function RecipeBook() {
   const [data, setData] = useState(() => loadData());
@@ -1008,7 +1056,6 @@ function RecipeBook() {
     }
     saveCalendar(cal);
     setCalVersion(v => v + 1);
-    setPlanRecipe(null);
 
     const prefs = loadSyncPrefs();
     if (prefs.enabled) {
@@ -1131,7 +1178,7 @@ function RecipeBook() {
         recipes={data.recipes||[]}
       />}
       {lightbox && <Lightbox photos={lightbox.photos||[lightbox.src||lightbox]} startIndex={lightbox.index||0} onClose={()=>setLightbox(null)} />}
-      {planRecipe && <AddToPlanModal recipe={planRecipe} onAssign={(dateKey,slot,servings,leftoverSlot,leftoverDays)=>addToMealPlan(planRecipe.id,dateKey,slot,servings,leftoverSlot,leftoverDays)} onClose={()=>setPlanRecipe(null)} />}
+      {planRecipe && <AddToPlanModal recipe={planRecipe} onQuickAddRecipe={upsertRecipe} onAssign={(recipeId,dateKey,slot,servings,leftoverSlot,leftoverDays)=>addToMealPlan(recipeId,dateKey,slot,servings,leftoverSlot,leftoverDays)} onClose={()=>setPlanRecipe(null)} />}
     </>
   );
 }
@@ -1408,16 +1455,44 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
 }
 
 // ── Add to Meal Plan (quick-add from recipe view) ─────────────────────────
-function AddToPlanModal({ recipe, onAssign, onClose }) {
+function AddToPlanModal({ recipe, onAssign, onClose, onQuickAddRecipe }) {
   const [dateKey, setDateKey] = useState(todayKey());
   const [slot, setSlot] = useState("dinner");
   const [servings, setServings] = useState(recipe?.servings || 1);
   const [hasLeftovers, setHasLeftovers] = useState(false);
   const [leftoverSlot, setLeftoverSlot] = useState("lunch");
   const [leftoverDays, setLeftoverDays] = useState(2);
+  const [saving, setSaving] = useState(false);
+  const [extraName, setExtraName] = useState("");
+  const [addingExtra, setAddingExtra] = useState(false);
+  const [addedExtras, setAddedExtras] = useState([]);
 
   if (!recipe) return null;
   const dateLabel = new Date(dateKey+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    await onAssign(recipe.id, dateKey, slot, servings, hasLeftovers?leftoverSlot:null, hasLeftovers?leftoverDays:0);
+    setSaving(false);
+    onClose();
+  }
+
+  // Add a second (or third...) item to this same date+slot without needing
+  // a full recipe — e.g. "Sirloin Steaks" alongside a topping recipe. Mirrors
+  // the quick-add already used for the Calendar tab and Food Log.
+  async function handleAddExtra() {
+    const name = extraName.trim();
+    if (!name || addingExtra) return;
+    setAddingExtra(true);
+    const nutrition = await estimateNutritionForFood(name);
+    const quick = buildQuickRecipe(name, nutrition);
+    await onQuickAddRecipe(quick);
+    await onAssign(quick.id, dateKey, slot, 1, null, 0);
+    setAddedExtras(e=>[...e, name]);
+    setExtraName("");
+    setAddingExtra(false);
+  }
 
   return (
     <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -1464,9 +1539,28 @@ function AddToPlanModal({ recipe, onAssign, onClose }) {
             </div>
           </div>
         )}
+
+        {/* Quick-add extras: round out the meal with items that don't have a recipe yet */}
+        <div className="form-group">
+          <label className="form-label">Add something else to this meal? (no recipe needed)</label>
+          <div style={{display:"flex",gap:8}}>
+            <input className="form-input" placeholder="e.g. Sirloin Steaks" value={extraName}
+              onChange={e=>setExtraName(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();handleAddExtra();}}} />
+            <button className="btn btn-outline btn-sm" disabled={!extraName.trim()||addingExtra} onClick={handleAddExtra}>
+              {addingExtra?"…":"+ Add"}
+            </button>
+          </div>
+          {addedExtras.length>0&&(
+            <div style={{marginTop:8,fontSize:12,color:"var(--ink-light)"}}>
+              ✓ Added to {MEAL_LABELS[slot].split(" ")[1]} on {dateLabel}: {addedExtras.join(", ")}
+            </div>
+          )}
+        </div>
+
         <div style={{display:"flex",gap:8}}>
-          <button className="btn btn-primary" onClick={()=>onAssign(dateKey,slot,servings,hasLeftovers?leftoverSlot:null,hasLeftovers?leftoverDays:0)}>Add to {dateLabel}</button>
-          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving?"Adding…":`Add to ${dateLabel}`}</button>
+          <button className="btn btn-outline" onClick={onClose}>{addedExtras.length>0?"Done":"Cancel"}</button>
         </div>
       </div>
     </div>
@@ -4451,53 +4545,11 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], onQuickAddReci
   const exactMatch = trimmedSearch && recipes.some(r=>r.title.toLowerCase()===trimmedSearch.toLowerCase());
   const showQuickAdd = trimmedSearch.length>0 && !exactMatch && onQuickAddRecipe;
 
-  async function estimateNutrition(foodName) {
-    try {
-      const prompt = `Estimate typical nutrition for one serving of "${foodName}" as it would commonly be prepared at home. Return ONLY a JSON object, no markdown, no extra text, with these exact numeric fields (no units, just numbers, reasonable single-serving estimates): {"calories":0,"protein":0,"carbs":0,"fat":0}`;
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-          "x-claude-secret": "henschel-claude-2026"
-        },
-        body: JSON.stringify({ action: "ai", content: prompt, max_tokens: 200 })
-      });
-      const wrapper = await response.json();
-      if (wrapper.error) throw new Error(wrapper.error);
-      const text = (wrapper.data.content||[]).map(b=>b.text||"").join("");
-      const clean = text.replace(/```json|```/g,"").trim();
-      return JSON.parse(clean);
-    } catch {
-      return null; // estimate failed — fall back to letting the user type it in manually
-    }
-  }
-
   async function handleQuickAdd() {
     if (!trimmedSearch || quickAdding) return;
     setQuickAdding(true);
-    const nutrition = await estimateNutrition(trimmedSearch);
-    const quick = {
-      id: uid(),
-      title: trimmedSearch,
-      description: "",
-      cuisine: "American",
-      categories: ["Other"],
-      servings: 1,
-      prepTime: 0,
-      cookTime: 0,
-      tags: ["quick-add"],
-      diets: [],
-      calories: nutrition?.calories ?? null,
-      protein: nutrition?.protein ?? null,
-      carbs: nutrition?.carbs ?? null,
-      fat: nutrition?.fat ?? null,
-      ingredients: [trimmedSearch],
-      steps: [],
-      notes: nutrition ? "" : "Calories not estimated — edit this recipe to add nutrition info manually.",
-      isQuickAdd: true
-    };
+    const nutrition = await estimateNutritionForFood(trimmedSearch);
+    const quick = buildQuickRecipe(trimmedSearch, nutrition);
     await onQuickAddRecipe(quick);
     setChosen(quick.id);
     setQuickAdding(false);
