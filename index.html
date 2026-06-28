@@ -20,7 +20,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useEffect, useRef, useCallback } = React;
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 const STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=Special+Elite&family=Lato:wght@300;400;700&display=swap');
@@ -3224,6 +3224,81 @@ function scanForAutoDeductMatches(calendar, recipes, pantryItems) {
   return results;
 }
 
+// Sums ingredient amounts (scaled by servings) across every non-leftover
+// calendar entry in [startDate, endDate], grouped by ingredient name+unit.
+// Leftover entries are skipped since they reuse an already-cooked batch and
+// need no new shopping. Scale per entry is entry.servings / recipe.servings,
+// so planning a half-batch or double-batch via the servings field on a
+// calendar entry scales ingredients accordingly.
+function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
+  const needs = {};
+  for (const [date, slots] of Object.entries(calendar||{})) {
+    if (date < startDate || date > endDate) continue;
+    for (const entries of Object.values(slots||{})) {
+      const arr = Array.isArray(entries) ? entries : (entries && entries.id ? [entries] : []);
+      for (const entry of arr) {
+        if (!entry || !entry.id || entry.leftover) continue;
+        const recipe = recipes.find(r=>r.id===entry.id);
+        if (!recipe || !recipe.ingredients) continue;
+        const recipeServings = recipe.servings || 1;
+        const scale = (entry.servings || recipeServings) / recipeServings;
+        for (const ingStr of recipe.ingredients) {
+          const parsed = parseIngredient(ingStr);
+          if (!parsed.name) continue;
+          const groupKey = normalizeWords(parsed.name).join(" ") + "|" + (parsed.unitKey||"");
+          if (!needs[groupKey]) {
+            needs[groupKey] = { name: parsed.name, unitKey: parsed.unitKey, unitDisplay: parsed.unitDisplay, totalAmount: 0, hasAmount: false, recipeNames: new Set() };
+          }
+          if (parsed.amount !== null) {
+            needs[groupKey].totalAmount += parsed.amount * scale;
+            needs[groupKey].hasAmount = true;
+          }
+          needs[groupKey].recipeNames.add(recipe.title || recipe.name || "Recipe");
+        }
+      }
+    }
+  }
+  return Object.values(needs);
+}
+
+// Builds the full Shopping tab list: items needed for calendar-planned meals
+// in the given date range (skipped entirely if pantry already shows "have"
+// for a fuzzy-matched item, since current stock is assumed to cover it),
+// merged with the existing low/out restock list so nothing is duplicated.
+function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd) {
+  const restock = pantryItems.filter(i=>i.status==="low"||i.status==="out");
+  if (!rangeStart || !rangeEnd) {
+    return restock.map(i=>({...i, mealQty:null, mealRecipes:null}));
+  }
+  const needs = getCalendarIngredientNeeds(calendar, recipes, rangeStart, rangeEnd);
+  const usedPantryIds = new Set();
+  const mealItems = [];
+  for (const need of needs) {
+    const match = pantryItems.find(p => fuzzyIngredientMatch(need.name, p.name));
+    const qtyStr = need.hasAmount ? `${formatAmount(need.totalAmount,1,need.unitKey)}${need.unitDisplay?" "+need.unitDisplay:""}`.trim() : "";
+    const recipeList = [...need.recipeNames].join(", ");
+    if (match) {
+      if (match.status === "have") continue; // assume current stock covers it
+      usedPantryIds.add(match.id);
+      mealItems.push({ ...match, mealQty: qtyStr || null, mealRecipes: recipeList });
+    } else {
+      mealItems.push({
+        id: "meal-"+normalizeWords(need.name).join("-"),
+        name: need.name.replace(/^\w/, c=>c.toUpperCase()),
+        category: "Other",
+        status: "out",
+        quantity: "",
+        notes: "",
+        mealQty: qtyStr || null,
+        mealRecipes: recipeList,
+        notInPantry: true
+      });
+    }
+  }
+  const remainingRestock = restock.filter(i=>!usedPantryIds.has(i.id)).map(i=>({...i, mealQty:null, mealRecipes:null}));
+  return [...mealItems, ...remainingRestock];
+}
+
 function PantryTab({ recipes, version }) {
   const [items, setItems] = useState(()=>loadPantry());
   useEffect(()=>{ if(version>0) setItems(loadPantry()); },[version]);
@@ -3236,6 +3311,8 @@ function PantryTab({ recipes, version }) {
   const [showPhotoImport, setShowPhotoImport] = useState(false);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [showReview, setShowReview] = useState(false);
+  const [mealRangeStart, setMealRangeStart] = useState("");
+  const [mealRangeEnd, setMealRangeEnd] = useState("");
 
   // Re-scan for auto-deduct matches every time the Pantry tab mounts/loads.
   useEffect(()=>{
@@ -3287,7 +3364,11 @@ function PantryTab({ recipes, version }) {
       && (!filterCat || i.category===filterCat);
   });
 
-  const shoppingList = items.filter(i=>i.status==="low"||i.status==="out");
+  const restockCount = items.filter(i=>i.status==="low"||i.status==="out").length;
+  const shoppingList = useMemo(
+    () => buildShoppingList(items, loadCalendar(), recipes||[], mealRangeStart, mealRangeEnd),
+    [items, recipes, mealRangeStart, mealRangeEnd, version]
+  );
   const usedCats = [...new Set(filtered.map(i=>i.category||"Other"))].sort();
 
   // Group by category
@@ -3307,7 +3388,7 @@ function PantryTab({ recipes, version }) {
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:20}}>
         <div>
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>🥫 Pantry</div>
-          <p className="text-muted">{items.length} items · {shoppingList.length} need restocking</p>
+          <p className="text-muted">{items.length} items · {restockCount} need restocking</p>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button className={`btn btn-sm ${view==="pantry"?"btn-primary":"btn-outline"}`} onClick={()=>setView("pantry")}>Pantry</button>
@@ -3337,7 +3418,17 @@ function PantryTab({ recipes, version }) {
       )}
 
       {view==="shopping" ? (
-        <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} />
+        <>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:16,background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"10px 12px"}}>
+            <span style={{fontSize:13,fontWeight:600,whiteSpace:"nowrap"}}>📅 Include meals planned</span>
+            <input type="date" className="form-input" style={{maxWidth:150}} value={mealRangeStart} onChange={e=>setMealRangeStart(e.target.value)} />
+            <span style={{fontSize:13,color:"var(--ink-light)"}}>to</span>
+            <input type="date" className="form-input" style={{maxWidth:150}} value={mealRangeEnd} onChange={e=>setMealRangeEnd(e.target.value)} />
+            <button className="btn btn-outline btn-sm" onClick={()=>{ const s=todayKey(); setMealRangeStart(s); setMealRangeEnd(addDays(s,6)); }}>Next 7 days</button>
+            {(mealRangeStart||mealRangeEnd) && <button className="btn btn-ghost btn-sm" onClick={()=>{setMealRangeStart("");setMealRangeEnd("");}}>Clear</button>}
+          </div>
+          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} />
+        </>
       ) : (
         <>
           <div className="toolbar" style={{marginBottom:16}}>
@@ -3427,7 +3518,7 @@ function PantryTab({ recipes, version }) {
   );
 }
 
-function ShoppingList({ items, onCycleStatus, onEdit, statBadge }) {
+function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals }) {
   const grouped = {};
   items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
 
@@ -3435,23 +3526,35 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge }) {
     <div className="empty-state">
       <div className="empty-icon">🛒</div>
       <div className="empty-title">Shopping list is clear!</div>
-      <p>Items marked "Running low" or "Out" will appear here.</p>
+      <p>Items marked "Running low" or "Out" will appear here{showingMeals?", along with anything needed for your planned meals":""}.</p>
     </div>
   );
 
   return (
     <div>
-      <p className="text-muted" style={{marginBottom:16}}>Tap a badge to update status when you restock.</p>
+      <p className="text-muted" style={{marginBottom:16}}>
+        Tap a badge to update status when you restock.
+        {showingMeals && " Items marked 📅 are pulled in from meals on your calendar."}
+      </p>
       {Object.entries(grouped).map(([cat,catItems])=>(
         <div key={cat} style={{marginBottom:16}}>
           <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"var(--ink-light)",marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--parchment-dark)"}}>{cat}</div>
           {catItems.map(item=>(
             <div key={item.id} style={{display:"flex",alignItems:"center",padding:"10px 0",borderBottom:"1px dashed var(--parchment-dark)",gap:10}}>
               <div style={{flex:1}}>
-                <div style={{fontWeight:600,fontSize:15}}>{item.name}</div>
-                {pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>}
+                <div style={{fontWeight:600,fontSize:15}}>
+                  {item.mealQty && <span title={item.mealRecipes?`For: ${item.mealRecipes}`:""}>📅 </span>}
+                  {item.name}
+                </div>
+                {item.mealQty
+                  ? <div style={{fontSize:12,color:"var(--ink-light)"}}>Need {item.mealQty}{item.mealRecipes?` for ${item.mealRecipes}`:""}</div>
+                  : (pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>)
+                }
               </div>
-              <div onClick={()=>onCycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
+              {item.notInPantry
+                ? <span style={{fontSize:11,color:"var(--ink-light)",fontStyle:"italic"}}>not in pantry</span>
+                : <div onClick={()=>onCycleStatus(item.id)} style={{cursor:"pointer"}}>{statBadge(item.status||"have")}</div>
+              }
             </div>
           ))}
         </div>
