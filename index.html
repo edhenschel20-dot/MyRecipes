@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>The Recipe Book</title>
   <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=2" />
+  <link rel="apple-touch-icon" href="icon-180.png?v=2" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Recipes" />
@@ -4747,6 +4749,8 @@ function FoodLogTab({ recipes=[] }) {
   const [estimating, setEstimating] = useState(false);
   const [manualCal, setManualCal] = useState("");
   const [manualCarbs, setManualCarbs] = useState("");
+  const [burnInput, setBurnInput] = useState("");
+  const [burnLabel, setBurnLabel] = useState("");
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipeChosen, setRecipeChosen] = useState(null);
   const [recipeServings, setRecipeServings] = useState(1);
@@ -4827,8 +4831,21 @@ function FoodLogTab({ recipes=[] }) {
     setRecipeChosen(null); setRecipeSearch(""); setRecipeServings(1);
   }
 
+  // Exercise is stored as a normal food_log entry with NEGATIVE calories, so it
+  // syncs across both phones with no schema change. Anything with calories<0 = a burn.
+  async function logExercise() {
+    const b = parseInt(String(burnInput).replace(/[^0-9]/g,""),10);
+    if (!b || b<=0) return;
+    const name = burnLabel.trim() || "Exercise";
+    await addEntry({ name, calories: -Math.abs(b), carbs:null, protein:null, fat:null });
+    setBurnInput(""); setBurnLabel("");
+  }
+  const isBurn = e => (e.calories||0) < 0;
+
   const dayEntries = entries.filter(e=>e.person===activePerson && e.date===viewDate).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
-  const totalCal = dayEntries.reduce((s,e)=>s+(e.calories||0),0);
+  const eatenCal  = dayEntries.reduce((s,e)=> s + ((e.calories||0)>0 ? e.calories : 0), 0);
+  const burnedCal = dayEntries.reduce((s,e)=> s + ((e.calories||0)<0 ? -e.calories : 0), 0);
+  const netCal    = eatenCal - burnedCal;
   const totalCarbs = dayEntries.reduce((s,e)=>s+(e.carbs||0),0);
   const personGoals = prefs.goals?.[activePerson] || {};
   const dateLabel = new Date(viewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
@@ -4866,8 +4883,21 @@ function FoodLogTab({ recipes=[] }) {
       {!isToday && <div style={{textAlign:"center",marginBottom:10}}><button className="btn btn-ghost btn-sm" onClick={()=>setViewDate(todayKey())}>Jump to today</button></div>}
 
       <div style={{background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"12px 16px",marginBottom:14}}>
-        <GoalBar label="Calories" consumed={totalCal} goal={personGoals.calorieGoal||0} unit=" cal" color="var(--sage)"/>
+        <GoalBar label="Calories" consumed={netCal} goal={personGoals.calorieGoal||0} unit=" cal" color="var(--sage)"/>
+        {burnedCal>0 && (
+          <div style={{fontSize:11,color:"var(--ink-light)",margin:"-4px 0 10px"}}>
+            🍽 {eatenCal} eaten − 🏃 {burnedCal} burned = <strong style={{color:"var(--ink)"}}>{netCal} net</strong>
+          </div>
+        )}
         <GoalBar label="Carbs" consumed={totalCarbs} goal={personGoals.carbGoal||0} unit="g" color="#5a7a9a"/>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginTop:12,paddingTop:12,borderTop:"1px dashed var(--parchment-dark)"}}>
+          <span style={{fontSize:12,fontWeight:700,color:"var(--ink-mid)",whiteSpace:"nowrap"}}>🏃 Burned</span>
+          <input className="form-input" type="number" inputMode="numeric" placeholder="cal" value={burnInput}
+            onChange={e=>setBurnInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")logExercise();}} style={{maxWidth:90}}/>
+          <input className="form-input" placeholder="label (e.g. Walk)" value={burnLabel}
+            onChange={e=>setBurnLabel(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")logExercise();}} style={{flex:1,minWidth:0}}/>
+          <button className="btn btn-outline btn-sm" disabled={!burnInput} onClick={logExercise} style={{whiteSpace:"nowrap"}}>− Log</button>
+        </div>
       </div>
 
       <div style={{background:"var(--parchment-dark)",borderRadius:6,padding:12,marginBottom:14}}>
@@ -4925,15 +4955,23 @@ function FoodLogTab({ recipes=[] }) {
 
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {dayEntries.length===0&&<div style={{fontSize:13,color:"var(--ink-light)",fontStyle:"italic",textAlign:"center",padding:20}}>Nothing logged yet for {activePerson}.</div>}
-        {dayEntries.map(e=>(
-          <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6}}>
+        {dayEntries.map(e=>{
+          const burn = isBurn(e);
+          return (
+          <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderLeft:`4px solid ${burn?"var(--sage)":"var(--parchment-dark)"}`,borderRadius:6}}>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontWeight:700,fontSize:14}}>{e.name}</div>
-              <div style={{fontSize:12,color:"var(--ink-light)"}}>{e.time} {e.calories!=null&&`· 🔥 ${e.calories} cal`} {e.carbs!=null&&`· ${e.carbs}g carbs`}</div>
+              <div style={{fontWeight:700,fontSize:14}}>{burn?"🏃 ":""}{e.name}</div>
+              <div style={{fontSize:12,color:"var(--ink-light)"}}>
+                {e.time}
+                {burn
+                  ? <span style={{color:"var(--sage)",fontWeight:700}}> · −{Math.abs(e.calories)} cal burned</span>
+                  : <>{e.calories!=null&&` · 🔥 ${e.calories} cal`} {e.carbs!=null&&`· ${e.carbs}g carbs`}</>}
+              </div>
             </div>
             <button className="btn btn-sm btn-danger" style={{fontSize:11,padding:"6px 8px"}} onClick={()=>removeEntry(e.id)}>✕</button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {showHistory && (
