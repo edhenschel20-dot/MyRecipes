@@ -2424,27 +2424,48 @@ function parseStashcook(text) {
 
 
 // ── Recipe URL fetcher ─────────────────────────────────────────────────────
-async function fetchRecipeFromUrl(url) {
+// Fetches a page's HTML for recipe import. Tries our own edge function
+// first (server-side fetch, no CORS/proxy flakiness), then falls back to
+// public CORS proxies if that function isn't deployed yet or errors.
+async function fetchHtmlForUrl(url) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-page`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "x-claude-secret": "henschel-claude-2026" },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.html && data.html.length > 500) return data.html;
+    }
+  } catch(e) { /* fall through to public proxies */ }
+
   const proxies = [
-    u => "https://corsproxy.io/?" + encodeURIComponent(u),
+    u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
     u => "https://api.allorigins.win/get?url=" + encodeURIComponent(u),
     u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
   ];
-  let html = null;
   for (const makeProxy of proxies) {
     try {
       const res = await fetch(makeProxy(url), { signal: AbortSignal.timeout(8000) });
       if (!res.ok) continue;
       const ct = res.headers.get("content-type") || "";
+      let html;
       if (ct.includes("application/json")) {
         const data = await res.json();
         html = data.contents || data.body || null;
       } else {
         html = await res.text();
       }
-      if (html && html.length > 500) break;
+      if (html && html.length > 500) return html;
     } catch(e) { continue; }
   }
+  return null;
+}
+
+async function fetchRecipeFromUrl(url) {
+  const html = await fetchHtmlForUrl(url);
   if (!html) throw new Error("Could not fetch that page");
 
   const parser = new DOMParser();
