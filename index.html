@@ -2474,7 +2474,66 @@ async function fetchRecipeFromUrl(url) {
   const schemaEl = doc.querySelector('[itemtype*="schema.org/Recipe"]');
   if (schemaEl) return parseUrlMicrodata(schemaEl, url, imageUrl);
 
-  throw new Error("no_schema");
+  // No structured data on the page — fall back to AI extraction from the
+  // page text, same as pasting the recipe in manually.
+  return await aiExtractRecipeFromHtml(html, url, imageUrl);
+}
+
+// Strips a raw HTML document down to readable text so it's small and clean
+// enough to hand to the AI for extraction.
+function stripHtmlToText(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(br|p|div|li|h[1-6]|tr)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Fallback recipe importer for pages with no schema.org/JSON-LD markup —
+// sends the page's stripped text to Claude via the claude-sync edge
+// function and asks for the same structured shape the app uses.
+async function aiExtractRecipeFromHtml(html, sourceUrl, imageUrl) {
+  const text = stripHtmlToText(html).slice(0, 12000);
+  const prompt = "Extract the single primary recipe from this webpage's text content into JSON. Return ONLY a JSON object, no markdown, no explanation, with this exact shape: {\"title\":string,\"description\":string,\"cuisine\":string,\"categories\":[string],\"servings\":number,\"prepTime\":number,\"cookTime\":number,\"tags\":[string],\"diets\":[string],\"ingredients\":[string],\"steps\":[string],\"calories\":number,\"protein\":number,\"carbs\":number,\"fat\":number,\"fiber\":number,\"sugar\":number,\"sodium\":number}. Use only these categories: Appetizer,Breakfast,Brunch,Lunch,Dinner,Dessert,Snack,Side Dish,Sauce,Topping,Dressing,Marinade,Rub,Soup,Salad,Bread,Drink,Other. prepTime and cookTime are in minutes. Combine quantity, unit, item and prep into one string per ingredient (e.g. '2 lb chuck roast, cubed'). Ignore site navigation, ads, comments, related-recipe links, and any other recipes on the page. Omit a field entirely if it isn't in the text rather than guessing. Page text:\\n\\n" + text;
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "x-claude-secret": "henschel-claude-2026" },
+    body: JSON.stringify({ action: "ai", content: prompt, max_tokens: 2000 })
+  });
+  const wrapper = await response.json();
+  if (wrapper.error) throw new Error(wrapper.error);
+  const raw = (wrapper.data.content || []).map(b => b.text || "").join("");
+  const clean = raw.replace(/```json|```/g, "").trim();
+  const start = clean.indexOf("{"), end = clean.lastIndexOf("}");
+  const parsed = JSON.parse(clean.slice(start, end + 1));
+  if (!parsed.title || !parsed.steps || !parsed.steps.length) throw new Error("Couldn't find a recipe on that page.");
+  return normalizeRecipe({
+    id: uid(), photo: null, photos: [], diets: parsed.diets || [], categories: parsed.categories || [],
+    _imageUrl: imageUrl,
+    title: parsed.title, description: parsed.description || "", cuisine: parsed.cuisine || "",
+    tags: parsed.tags || [], servings: parseInt(parsed.servings) || 4,
+    prepTime: parseInt(parsed.prepTime) || 0, cookTime: parseInt(parsed.cookTime) || 0,
+    ingredients: parsed.ingredients || [], steps: parsed.steps || [], source: sourceUrl, aiGenerated: true,
+    calories: parsed.calories || null, protein: parsed.protein || null, carbs: parsed.carbs || null,
+    fat: parsed.fat || null, fiber: parsed.fiber || null, sugar: parsed.sugar || null, sodium: parsed.sodium || null,
+  });
+}
+
+// Strips tracking junk (fbclid, gclid, utm_*, etc.) so proxies/parsers see a
+// clean canonical URL.
+function cleanRecipeUrl(url) {
+  try {
+    const u = new URL(url.trim());
+    ["fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "si"].forEach(p => u.searchParams.delete(p));
+    Array.from(u.searchParams.keys()).forEach(k => { if (/^utm_/i.test(k)) u.searchParams.delete(k); });
+    return u.toString();
+  } catch { return url.trim(); }
 }
 
 function parseUrlRecipeSchema(schema, sourceUrl, imageUrl) {
@@ -2619,7 +2678,7 @@ function ImportTab({onImport, pendingShare}) {
   async function handleUrlImport(url) {
     setError(""); setResult(null); setLoading(true);
     try {
-      let recipe = await fetchRecipeFromUrl(url);
+      let recipe = await fetchRecipeFromUrl(cleanRecipeUrl(url));
       // Try to fetch the recipe photo automatically
       if (recipe._imageUrl) {
         setError(""); // clear any error
@@ -2627,11 +2686,7 @@ function ImportTab({onImport, pendingShare}) {
       }
       setResult(recipe);
     } catch(e) {
-      if (e.message === "no_schema") {
-        setError("This page doesn't have structured recipe data. Try Paste Any Recipe instead.");
-      } else {
-        setError("Could not load that URL. Make sure it's a public recipe page and try again.");
-      }
+      setError(e && e.message ? e.message : "Could not load that URL. Make sure it's a public recipe page and try again.");
     }
     setLoading(false);
   }
@@ -2656,9 +2711,14 @@ function ImportTab({onImport, pendingShare}) {
     }
     try {
       const prompt = "Parse this recipe text into structured JSON. Return ONLY the JSON object.\n\nRequired fields: title, cuisine, servings (number), prepTime (number), cookTime (number), description, tags (array), diets (array), calories (number), protein (number), carbs (number), fat (number), fiber (number), ingredients (array of strings with amounts), steps (array of strings).\n\nRecipe text:\n" + inputText;
-      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,messages:[{role:"user",content:prompt}]})});
-      const data = await res.json();
-      const text = data.content?.map(b=>b.text||"").join("") || "";
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "x-claude-secret": "henschel-claude-2026" },
+        body: JSON.stringify({ action: "ai", content: prompt, max_tokens: 1500 })
+      });
+      const wrapper = await res.json();
+      if (wrapper.error) throw new Error(wrapper.error);
+      const text = (wrapper.data.content || []).map(b=>b.text||"").join("");
       const clean = text.replace(/```json|```/g,"").trim();
       const start = clean.indexOf("{"), end2 = clean.lastIndexOf("}");
       const parsed = JSON.parse(clean.slice(start, end2+1));
@@ -2684,7 +2744,7 @@ function ImportTab({onImport, pendingShare}) {
         {mode==="url" && (
           <div>
             <p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>
-              Paste any recipe URL from sites like AllRecipes, Food Network, Serious Eats, NYT Cooking, Bon Appétit, and thousands more. Most major recipe sites work automatically.
+              Paste any recipe URL — food blogs, AllRecipes, Food Network, Serious Eats, and more. Reads the page's structured recipe data when it's there, and falls back to AI extraction otherwise, so it also works on the smaller sites AllRecipes-style parsers usually miss.
             </p>
             <div className="ai-input-row" style={{marginBottom:8}}>
               <input className="ai-input" placeholder="https://www.allrecipes.com/recipe/..." value={urlInput} onChange={e=>{setUrlInput(e.target.value);setError("");setResult(null);}} />
