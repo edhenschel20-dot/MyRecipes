@@ -4357,9 +4357,23 @@ function loadFoodLogPrefs() {
   return { people:["Ed","Sue"], goals:{}, devicePerson:null };
 }
 function saveFoodLogPrefs(p) { try { localStorage.setItem(FOODLOG_PREFS_KEY,JSON.stringify(p)); } catch {} }
+// food_log.weight is added by migration. Probe once so the app keeps working
+// either way: with the column we store a real number, without it the weight
+// still rides in the entry name and nothing else in the food log breaks.
+let FOODLOG_WEIGHT_COL = null;
+async function hasWeightColumn() {
+  if (FOODLOG_WEIGHT_COL !== null) return FOODLOG_WEIGHT_COL;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/food_log?select=weight&limit=1`, { headers: sbHeaders() });
+    FOODLOG_WEIGHT_COL = res.ok;
+  } catch { FOODLOG_WEIGHT_COL = false; }
+  return FOODLOG_WEIGHT_COL;
+}
 async function pushFoodLogEntry(e) {
   try {
-    await sbUpsert("food_log", [{ id:e.id, person:e.person, date:e.date, time:e.time||"", name:e.name, calories:e.calories??null, carbs:e.carbs??null, protein:e.protein??null, fat:e.fat??null }]);
+    const row = { id:e.id, person:e.person, date:e.date, time:e.time||"", name:e.name, calories:e.calories??null, carbs:e.carbs??null, protein:e.protein??null, fat:e.fat??null };
+    if (await hasWeightColumn()) row.weight = e.weight??null;
+    await sbUpsert("food_log", [row]);
   } catch(err) { console.warn("food_log push failed:", err); }
 }
 async function deleteFoodLogEntry(id) {
@@ -4818,6 +4832,36 @@ function GoalBar({ label, consumed, goal, unit, color }) {
   );
 }
 
+function WeightSparkline({ points, unit }) {
+  if (!points || points.length < 2) return null;
+  const W=300, H=56, PAD=8;
+  const vals = points.map(p=>p.v);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max-min) || 1;
+  const xy = points.map((p,i)=>[
+    PAD + (i/(points.length-1))*(W-PAD*2),
+    PAD + (1-(p.v-min)/span)*(H-PAD*2)
+  ]);
+  const line = xy.map(([x,y],i)=>(i?"L":"M")+x.toFixed(1)+" "+y.toFixed(1)).join(" ");
+  const area = line + ` L ${xy[xy.length-1][0].toFixed(1)} ${H-PAD} L ${xy[0][0].toFixed(1)} ${H-PAD} Z`;
+  const [lx,ly] = xy[xy.length-1];
+  const fmt = d => new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  return (
+    <div style={{marginTop:8}}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:56,display:"block",overflow:"visible"}} preserveAspectRatio="none">
+        <path d={area} fill="rgba(90,122,154,0.13)" stroke="none" />
+        <path d={line} fill="none" stroke="#5a7a9a" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <circle cx={lx} cy={ly} r="3.5" fill="#5a7a9a" />
+      </svg>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--ink-light)",marginTop:2}}>
+        <span>{fmt(points[0].d)} · {points[0].v}</span>
+        <span>{points.length} weigh-ins · range {min}–{max} {unit}</span>
+        <span>{fmt(points[points.length-1].d)} · {points[points.length-1].v}</span>
+      </div>
+    </div>
+  );
+}
+
 function FoodLogTab({ recipes=[] }) {
   const [prefs, setPrefs] = useState(()=>loadFoodLogPrefs());
   const [entries, setEntries] = useState(()=>loadFoodLog());
@@ -4847,7 +4891,7 @@ function FoodLogTab({ recipes=[] }) {
     (async()=>{
       const rows = await pullFoodLog();
       if (rows && rows.length>0) {
-        const mapped = rows.map(r=>({ id:r.id, person:r.person, date:r.date, time:r.time||"", name:r.name, calories:r.calories, carbs:r.carbs, protein:r.protein, fat:r.fat }));
+        const mapped = rows.map(r=>({ id:r.id, person:r.person, date:r.date, time:r.time||"", name:r.name, calories:r.calories, carbs:r.carbs, protein:r.protein, fat:r.fat, weight:r.weight??null }));
         setEntries(mapped);
       }
       setPulled(true);
@@ -4860,8 +4904,8 @@ function FoodLogTab({ recipes=[] }) {
     setShowWhoPicker(false);
   }
 
-  async function addEntry({ name, calories, carbs, protein=null, fat=null }) {
-    const entry = { id:"f"+Math.random().toString(36).slice(2,10), person:activePerson, date:viewDate, time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}), name, calories, carbs, protein, fat };
+  async function addEntry({ name, calories, carbs, protein=null, fat=null, weight=null }) {
+    const entry = { id:"f"+Math.random().toString(36).slice(2,10), person:activePerson, date:viewDate, time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}), name, calories, carbs, protein, fat, weight };
     setEntries(es=>[...es, entry]);
     await pushFoodLogEntry(entry);
   }
@@ -4929,8 +4973,12 @@ function FoodLogTab({ recipes=[] }) {
   // ("⚖️ 168.4 lb"). Text field, so a decimal can't be truncated by an integer
   // column, and it syncs to both phones with no schema change. calories/carbs stay null
   // so weigh-ins never touch any total.
-  const isWeigh = e => (e.name||"").startsWith("⚖️");
-  const weighValue = e => { const n = parseFloat(String(e.name||"").replace(/[^0-9.]/g,"")); return isFinite(n) ? n : null; };
+  const isWeigh = e => e.weight!=null || (e.name||"").startsWith("⚖️");
+  const weighValue = e => {
+    if (e.weight!=null) return Number(e.weight);
+    const n = parseFloat(String(e.name||"").replace(/[^0-9.]/g,""));
+    return isFinite(n) ? n : null;
+  };
   const weightUnit = prefs.weightUnit || "lb";
 
   async function logWeight() {
@@ -4938,7 +4986,7 @@ function FoodLogTab({ recipes=[] }) {
     if (!w || w<=0) return;
     const existing = entries.find(e=>e.person===activePerson && e.date===viewDate && isWeigh(e));
     if (existing) await removeEntry(existing.id);
-    await addEntry({ name:`⚖️ ${w} ${weightUnit}`, calories:null, carbs:null });
+    await addEntry({ name:`⚖️ ${w} ${weightUnit}`, calories:null, carbs:null, weight:w });
     setWeightInput("");
   }
 
@@ -4954,6 +5002,11 @@ function FoodLogTab({ recipes=[] }) {
     .sort((a,b)=>b.date.localeCompare(a.date))[0];
   const weightDelta = (todayWeight!=null && prevWeighIn && weighValue(prevWeighIn)!=null)
     ? Math.round((todayWeight - weighValue(prevWeighIn))*10)/10 : null;
+  const weightHistory = entries
+    .filter(e=>e.person===activePerson && isWeigh(e) && weighValue(e)!=null)
+    .sort((a,b)=>a.date.localeCompare(b.date))
+    .slice(-14)
+    .map(e=>({ d:e.date, v:weighValue(e) }));
   const personGoals = prefs.goals?.[activePerson] || {};
   const dateLabel = new Date(viewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
   const isToday = viewDate===todayKey();
@@ -5021,6 +5074,7 @@ function FoodLogTab({ recipes=[] }) {
             </span>
           )}
         </div>
+        <WeightSparkline points={weightHistory} unit={weightUnit} />
       </div>
 
       <div style={{background:"var(--parchment-dark)",borderRadius:6,padding:12,marginBottom:14}}>
