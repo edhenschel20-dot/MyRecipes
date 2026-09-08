@@ -4446,6 +4446,46 @@ async function pullFoodLog() {
   try { return await sbGet("food_log"); } catch(err) { console.warn("food_log pull failed:", err); return null; }
 }
 
+// ── Saved foods ────────────────────────────────────────────────────────────
+// Every scanned label gets remembered here as PER-SERVING numbers, so the next
+// time the same thing is eaten it can be typed by name instead of re-shot.
+// localStorage is the always-works layer; the saved_foods table syncs it to
+// both phones when it exists, and everything degrades quietly when it doesn't.
+const SAVEDFOODS_KEY = "recipebook_savedfoods_v1";
+function loadSavedFoods() {
+  try { const r = localStorage.getItem(SAVEDFOODS_KEY); if (r) return JSON.parse(r); } catch {}
+  return [];
+}
+function saveSavedFoods(d) { try { localStorage.setItem(SAVEDFOODS_KEY, JSON.stringify(d)); } catch {} }
+async function pushSavedFood(f) {
+  try {
+    await sbUpsert("saved_foods", [{
+      id: f.id, name: f.name, serving_text: f.servingText || "",
+      unit_count: f.unitCount ?? null, unit_name: f.unitName ?? null,
+      calories: f.calories ?? null, carbs: f.carbs ?? null,
+      protein: f.protein ?? null, fat: f.fat ?? null,
+      last_used: f.lastUsed || new Date().toISOString()
+    }]);
+  } catch (err) { console.warn("saved_foods push failed:", err); }
+}
+async function deleteSavedFood(id) {
+  try { await fetch(`${SUPABASE_URL}/rest/v1/saved_foods?id=eq.${id}`, { method:"DELETE", headers: sbHeaders() }); }
+  catch (err) { console.warn("saved_foods delete failed:", err); }
+}
+async function pullSavedFoods() {
+  try {
+    const rows = await sbGet("saved_foods");
+    if (!rows) return null;
+    return rows.map(r => ({
+      id: r.id, name: r.name, servingText: r.serving_text || "",
+      unitCount: r.unit_count ?? null, unitName: r.unit_name ?? null,
+      calories: r.calories ?? "", carbs: r.carbs ?? "",
+      protein: r.protein ?? "", fat: r.fat ?? "",
+      lastUsed: r.last_used || ""
+    }));
+  } catch (err) { console.warn("saved_foods pull failed:", err); return null; }
+}
+
 function dateKey(year,month,day) {
   return `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
 }
@@ -4950,9 +4990,28 @@ function FoodLogTab({ recipes=[] }) {
   const [scanError, setScanError] = useState("");
   const [scanResult, setScanResult] = useState(null);
   const [scanAmount, setScanAmount] = useState("");
+  const [savedFoods, setSavedFoods] = useState(loadSavedFoods);
 
   useEffect(()=>{ saveFoodLogPrefs(prefs); },[prefs]);
   useEffect(()=>{ saveFoodLog(entries); },[entries]);
+  useEffect(()=>{ saveSavedFoods(savedFoods); },[savedFoods]);
+
+  // Merge the cloud copy of saved foods in on top of whatever this phone has.
+  useEffect(()=>{
+    (async()=>{
+      const rows = await pullSavedFoods();
+      if (!rows) return;
+      setSavedFoods(local => {
+        const byName = new Map();
+        for (const f of [...local, ...rows]) {
+          const k = (f.name||"").trim().toLowerCase();
+          const prev = byName.get(k);
+          if (!prev || (f.lastUsed||"") > (prev.lastUsed||"")) byName.set(k, f);
+        }
+        return [...byName.values()];
+      });
+    })();
+  },[]);
 
   // Pull latest entries from Supabase once on mount so both phones stay in sync.
   useEffect(()=>{
@@ -5053,12 +5112,65 @@ function FoodLogTab({ recipes=[] }) {
   })();
   const scaleScan = v => { const n = parseFloat(v); return isFinite(n) ? Math.round(n * scanFactor) : null; };
 
+  // Store the per-serving record under its name. Same name = overwrite, so
+  // correcting a bad OCR read once fixes it for good.
+  function rememberFood(result) {
+    const name = (result.name||"").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    const existing = savedFoods.find(f => (f.name||"").trim().toLowerCase() === key);
+    const record = {
+      id: existing ? existing.id : "sf" + Math.random().toString(36).slice(2,10),
+      name,
+      servingText: result.servingText || "",
+      unitCount: result.unitCount ?? null,
+      unitName: result.unitName ?? null,
+      calories: result.calories === "" ? null : result.calories,
+      carbs: result.carbs === "" ? null : result.carbs,
+      protein: result.protein === "" ? null : result.protein,
+      fat: result.fat === "" ? null : result.fat,
+      lastUsed: new Date().toISOString()
+    };
+    setSavedFoods(list => [...list.filter(f => f.id !== record.id), record]);
+    pushSavedFood(record);
+  }
+
+  // Pull a remembered food back into the same review card the scanner uses,
+  // so the "how many did you eat" scaling works identically.
+  function useSavedFood(f) {
+    setScanResult({
+      name: f.name,
+      servingText: f.servingText || "",
+      unitCount: f.unitCount ?? null,
+      unitName: f.unitCount ? (f.unitName || "pieces") : null,
+      calories: f.calories ?? "", carbs: f.carbs ?? "",
+      protein: f.protein ?? "", fat: f.fat ?? ""
+    });
+    setScanAmount(String(f.unitCount != null ? f.unitCount : 1));
+    setScanImages([]); setScanError("");
+    setFoodInput("");
+    setMode("scan");
+  }
+
+  function forgetSavedFood(id) {
+    setSavedFoods(list => list.filter(f => f.id !== id));
+    deleteSavedFood(id);
+  }
+
+  const savedMatches = (() => {
+    const q = foodInput.trim().toLowerCase();
+    const sorted = [...savedFoods].sort((a,b) => (b.lastUsed||"").localeCompare(a.lastUsed||""));
+    if (!q) return sorted.slice(0,5);
+    return sorted.filter(f => (f.name||"").toLowerCase().includes(q)).slice(0,6);
+  })();
+
   async function addScanned() {
     if (!scanResult || scanFactor <= 0) return;
     const amt = parseFloat(scanAmount);
     const label = scanResult.unitCount
       ? `${scanResult.name} (${amt} ${scanResult.unitName})`
       : (amt === 1 ? scanResult.name : `${scanResult.name} (x${amt})`);
+    rememberFood(scanResult);
     await addEntry({
       name: label,
       calories: scaleScan(scanResult.calories),
@@ -5222,6 +5334,31 @@ function FoodLogTab({ recipes=[] }) {
                 onChange={e=>setFoodInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")estimateAndAdd();}} />
               <button className="btn btn-primary btn-sm" disabled={!foodInput.trim()||estimating} onClick={estimateAndAdd}>{estimating?"…":"⚡ AI Add"}</button>
             </div>
+            {savedMatches.length>0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:0.5,opacity:0.6,marginBottom:5}}>
+                  {foodInput.trim() ? "Saved foods" : "Recently scanned"}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {savedMatches.map(f=>(
+                    <div key={f.id} style={{display:"flex",alignItems:"center",gap:6}}>
+                      <button className="btn btn-outline btn-sm"
+                        style={{flex:1,textAlign:"left",justifyContent:"flex-start"}}
+                        onClick={()=>useSavedFood(f)}>
+                        {f.name}
+                        <span style={{opacity:0.6,fontWeight:400}}>
+                          {f.calories!=null && f.calories!=="" ? `  ·  ${f.calories} cal` : ""}
+                          {f.unitCount ? ` / ${f.unitCount} ${f.unitName||"pieces"}` : (f.servingText ? `  ·  ${f.servingText}` : "")}
+                        </span>
+                      </button>
+                      <button className="btn btn-sm" title="Forget this food"
+                        style={{padding:"0 8px",opacity:0.5}}
+                        onClick={()=>forgetSavedFood(f.id)}>×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               <input className="form-input" type="number" placeholder="cal (optional)" value={manualCal} onChange={e=>setManualCal(e.target.value)} style={{maxWidth:120}}/>
               <input className="form-input" type="number" placeholder="carbs g (optional)" value={manualCarbs} onChange={e=>setManualCarbs(e.target.value)} style={{maxWidth:140}}/>
@@ -5304,6 +5441,9 @@ function FoodLogTab({ recipes=[] }) {
                 <div style={{display:"flex",gap:8}}>
                   <button className="btn btn-primary btn-sm" disabled={scanFactor<=0} onClick={addScanned}>+ Log it</button>
                   <button className="btn btn-outline btn-sm" onClick={resetScan}>Start over</button>
+                </div>
+                <div style={{fontSize:11,opacity:0.6,marginTop:8}}>
+                  Saved under this name — next time just start typing it in "Type food".
                 </div>
               </div>
             )}
