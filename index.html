@@ -5097,6 +5097,17 @@ function FoodLogTab({ recipes=[] }) {
         protein: r.protein ?? "", fat: r.fat ?? ""
       });
       setScanAmount(String(unit != null ? unit : 1));
+      // Save it now. If the flow gets abandoned before "+ Log it", the label
+      // read still isn't wasted — and logging later just overwrites with any
+      // corrections made in the review card.
+      rememberFood({
+        name: r.name || "Scanned food",
+        servingText: r.servingText || "",
+        unitCount: unit,
+        unitName: unit ? (r.unitName || "pieces") : null,
+        calories: r.calories ?? "", carbs: r.carbs ?? "",
+        protein: r.protein ?? "", fat: r.fat ?? ""
+      });
     } catch (e) {
       setScanError("Couldn't read that label. " + (e.message || "Try a straighter shot of the Nutrition Facts panel."));
     }
@@ -5225,6 +5236,36 @@ function FoodLogTab({ recipes=[] }) {
   };
   const weightUnit = prefs.weightUnit || "lb";
 
+  // Anything already eaten is a suggestion too. This covers everything logged
+  // before the scanner existed, and everything typed or AI-added since.
+  const historyMatches = (() => {
+    const q = foodInput.trim().toLowerCase();
+    const savedNames = new Set(savedFoods.map(f => (f.name||"").trim().toLowerCase()));
+    const ordered = [...entries].sort((a,b) =>
+      ((b.date||"") + " " + (b.time||"")).localeCompare((a.date||"") + " " + (a.time||"")));
+    const seen = new Map();
+    for (const e of ordered) {
+      if (e.person !== activePerson || isBurn(e) || isWeigh(e)) continue;
+      const name = (e.name||"").trim();
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k) || savedNames.has(k)) continue;
+      if (q && !k.includes(q)) continue;
+      seen.set(k, e);
+      if (seen.size >= (q ? 6 : 4)) break;
+    }
+    return [...seen.values()];
+  })();
+
+  async function relogEntry(e) {
+    await addEntry({
+      name: e.name,
+      calories: e.calories ?? null, carbs: e.carbs ?? null,
+      protein: e.protein ?? null, fat: e.fat ?? null
+    });
+    setFoodInput("");
+  }
+
   async function logWeight() {
     const w = parseFloat(String(weightInput).replace(/[^0-9.]/g,""));
     if (!w || w<=0) return;
@@ -5334,11 +5375,13 @@ function FoodLogTab({ recipes=[] }) {
                 onChange={e=>setFoodInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")estimateAndAdd();}} />
               <button className="btn btn-primary btn-sm" disabled={!foodInput.trim()||estimating} onClick={estimateAndAdd}>{estimating?"…":"⚡ AI Add"}</button>
             </div>
-            {savedMatches.length>0 && (
+            {(savedMatches.length>0 || historyMatches.length>0) && (
               <div style={{marginBottom:10}}>
-                <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:0.5,opacity:0.6,marginBottom:5}}>
-                  {foodInput.trim() ? "Saved foods" : "Recently scanned"}
-                </div>
+                {savedMatches.length>0 && (
+                  <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:0.5,opacity:0.6,marginBottom:5}}>
+                    {foodInput.trim() ? "Saved foods" : "Recently scanned"}
+                  </div>
+                )}
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   {savedMatches.map(f=>(
                     <div key={f.id} style={{display:"flex",alignItems:"center",gap:6}}>
@@ -5357,6 +5400,26 @@ function FoodLogTab({ recipes=[] }) {
                     </div>
                   ))}
                 </div>
+
+                {historyMatches.length>0 && (
+                  <>
+                    <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:0.5,opacity:0.6,margin:"10px 0 5px"}}>
+                      Ate before
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                      {historyMatches.map(e=>(
+                        <button key={e.id} className="btn btn-outline btn-sm"
+                          style={{textAlign:"left",justifyContent:"flex-start"}}
+                          onClick={()=>relogEntry(e)}>
+                          {e.name}
+                          <span style={{opacity:0.6,fontWeight:400}}>
+                            {e.calories!=null ? `  ·  ${e.calories} cal` : ""}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
