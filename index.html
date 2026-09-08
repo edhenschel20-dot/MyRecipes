@@ -809,6 +809,69 @@ async function estimateNutritionForFood(foodName) {
   }
 }
 
+// Shrinks a phone photo before it goes to the AI endpoint. Camera shots are
+// 3-6 MB; base64 of that is slow to upload and burns tokens for no gain.
+// 1100px on the long edge still reads a Nutrition Facts panel cleanly.
+function compressImageFile(file, maxEdge = 1100, quality = 0.75) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read that photo."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not open that photo."));
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        const scale = Math.min(1, maxEdge / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve({ dataUrl, base64: dataUrl.split(",")[1], mediaType: "image/jpeg" });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Sends one or more label photos to Claude and gets back PER-SERVING nutrition
+// exactly as printed. Scaling to "how much did I actually eat" happens in the UI.
+async function readLabelFromPhotos(images) {
+  const prompt = `These photos show a packaged food, usually the front of the package and the Nutrition Facts panel.
+
+Return ONLY a JSON object, no markdown, no extra text:
+{"name":"Brand + product name","servingText":"serving size exactly as printed","unitCount":13,"unitName":"crackers","calories":150,"carbs":15,"protein":6,"fat":8}
+
+Rules:
+- Every nutrition number is PER SERVING, exactly as printed on the panel. Do not convert or round.
+- unitCount/unitName only when the serving is a countable number of pieces ("13 crackers" -> 13, "crackers"). If the serving is a weight or volume ("2/3 cup", "30g"), set both to null.
+- If there is no legible Nutrition Facts panel, estimate from the product name instead and still fill every field.`;
+
+  const blocks = images.map(im => ({
+    type: "image",
+    source: { type: "base64", media_type: im.mediaType, data: im.base64 }
+  }));
+  blocks.push({ type: "text", text: prompt });
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "x-claude-secret": "henschel-claude-2026"
+    },
+    body: JSON.stringify({ action: "ai", content: blocks, max_tokens: 500 })
+  });
+  const wrapper = await response.json();
+  if (wrapper.error) throw new Error(typeof wrapper.error === "string" ? wrapper.error : JSON.stringify(wrapper.error));
+  const text = (wrapper.data?.content || []).map(b => b.text || "").join("");
+  const clean = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(clean);
+}
+
 function buildQuickRecipe(title, nutrition) {
   return {
     id: uid(),
@@ -4882,6 +4945,11 @@ function FoodLogTab({ recipes=[] }) {
   const [recipeChosen, setRecipeChosen] = useState(null);
   const [recipeServings, setRecipeServings] = useState(1);
   const [pulled, setPulled] = useState(false);
+  const [scanImages, setScanImages] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [scanResult, setScanResult] = useState(null);
+  const [scanAmount, setScanAmount] = useState("");
 
   useEffect(()=>{ saveFoodLogPrefs(prefs); },[prefs]);
   useEffect(()=>{ saveFoodLog(entries); },[entries]);
@@ -4935,6 +5003,70 @@ function FoodLogTab({ recipes=[] }) {
       await addEntry({ name, calories: manualCal?+manualCal:null, carbs: manualCarbs?+manualCarbs:null });
     }
     setFoodInput(""); setManualCal(""); setManualCarbs(""); setEstimating(false);
+  }
+
+  async function onPickPhotos(fileList, ev) {
+    const files = Array.from(fileList || []);
+    if (ev && ev.target) ev.target.value = ""; // so the same file can be picked twice
+    if (!files.length) return;
+    setScanError("");
+    try {
+      const shots = [];
+      for (const f of files.slice(0, 3)) shots.push(await compressImageFile(f));
+      setScanImages(prev => [...prev, ...shots].slice(0, 3));
+    } catch (e) {
+      setScanError(e.message || "Could not read that photo.");
+    }
+  }
+
+  function resetScan() {
+    setScanImages([]); setScanResult(null); setScanAmount(""); setScanError("");
+  }
+
+  async function runScan() {
+    if (!scanImages.length || scanning) return;
+    setScanning(true); setScanError("");
+    try {
+      const r = await readLabelFromPhotos(scanImages);
+      const unit = (typeof r.unitCount === "number" && r.unitCount > 0) ? r.unitCount : null;
+      setScanResult({
+        name: r.name || "Scanned food",
+        servingText: r.servingText || "",
+        unitCount: unit,
+        unitName: unit ? (r.unitName || "pieces") : null,
+        calories: r.calories ?? "", carbs: r.carbs ?? "",
+        protein: r.protein ?? "", fat: r.fat ?? ""
+      });
+      setScanAmount(String(unit != null ? unit : 1));
+    } catch (e) {
+      setScanError("Couldn't read that label. " + (e.message || "Try a straighter shot of the Nutrition Facts panel."));
+    }
+    setScanning(false);
+  }
+
+  // Label numbers are per serving; this is the fraction of a serving actually eaten.
+  const scanFactor = (() => {
+    if (!scanResult) return 1;
+    const a = parseFloat(scanAmount);
+    if (!isFinite(a) || a <= 0) return 0;
+    return scanResult.unitCount ? a / scanResult.unitCount : a;
+  })();
+  const scaleScan = v => { const n = parseFloat(v); return isFinite(n) ? Math.round(n * scanFactor) : null; };
+
+  async function addScanned() {
+    if (!scanResult || scanFactor <= 0) return;
+    const amt = parseFloat(scanAmount);
+    const label = scanResult.unitCount
+      ? `${scanResult.name} (${amt} ${scanResult.unitName})`
+      : (amt === 1 ? scanResult.name : `${scanResult.name} (x${amt})`);
+    await addEntry({
+      name: label,
+      calories: scaleScan(scanResult.calories),
+      carbs: scaleScan(scanResult.carbs),
+      protein: scaleScan(scanResult.protein),
+      fat: scaleScan(scanResult.fat)
+    });
+    resetScan();
   }
 
   function addManual() {
@@ -5081,6 +5213,7 @@ function FoodLogTab({ recipes=[] }) {
         <div style={{display:"flex",gap:6,marginBottom:10}}>
           <button className={`btn btn-sm ${mode==="quick"?"btn-primary":"btn-outline"}`} onClick={()=>setMode("quick")}>Type food</button>
           <button className={`btn btn-sm ${mode==="recipe"?"btn-primary":"btn-outline"}`} onClick={()=>setMode("recipe")}>From a recipe</button>
+          <button className={`btn btn-sm ${mode==="scan"?"btn-primary":"btn-outline"}`} onClick={()=>setMode("scan")}>📷 Scan a label</button>
         </div>
         {mode==="quick"?(
           <>
@@ -5095,6 +5228,90 @@ function FoodLogTab({ recipes=[] }) {
               <button className="btn btn-outline btn-sm" disabled={!foodInput.trim()} onClick={addManual}>+ Add manually</button>
             </div>
           </>
+        ):mode==="scan"?(
+          <div>
+            {!scanResult && (
+              <>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                  <label className="btn btn-primary btn-sm" style={{cursor:"pointer",margin:0}}>
+                    📷 Take photo
+                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
+                      onChange={e=>onPickPhotos(e.target.files, e)} />
+                  </label>
+                  <label className="btn btn-outline btn-sm" style={{cursor:"pointer",margin:0}}>
+                    🖼 Choose photos
+                    <input type="file" accept="image/*" multiple style={{display:"none"}}
+                      onChange={e=>onPickPhotos(e.target.files, e)} />
+                  </label>
+                  {scanImages.length>0 && (
+                    <button className="btn btn-outline btn-sm" onClick={resetScan}>Clear</button>
+                  )}
+                </div>
+                <div style={{fontSize:12,opacity:0.7,marginBottom:10}}>
+                  Shoot the front of the package and the Nutrition Facts panel. Up to 3 photos.
+                </div>
+                {scanImages.length>0 && (
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                    {scanImages.map((im,i)=>(
+                      <div key={i} style={{position:"relative"}}>
+                        <img src={im.dataUrl} alt="" style={{width:74,height:74,objectFit:"cover",borderRadius:6,border:"1px solid var(--parchment-dark)"}} />
+                        <button className="btn btn-sm" title="Remove"
+                          style={{position:"absolute",top:-6,right:-6,padding:"0 6px",lineHeight:"18px",borderRadius:"50%",background:"var(--parchment)",border:"1px solid var(--parchment-dark)"}}
+                          onClick={()=>setScanImages(prev=>prev.filter((_,j)=>j!==i))}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button className="btn btn-primary btn-sm" disabled={!scanImages.length||scanning} onClick={runScan}>
+                  {scanning?"Reading label…":"Read label"}
+                </button>
+              </>
+            )}
+
+            {scanResult && (
+              <div>
+                <input className="search-input" style={{width:"100%",marginBottom:8}} value={scanResult.name}
+                  onChange={e=>setScanResult(r=>({...r,name:e.target.value}))} />
+                {scanResult.servingText && (
+                  <div style={{fontSize:12,opacity:0.7,marginBottom:8}}>
+                    Label serving: {scanResult.servingText}
+                  </div>
+                )}
+                <div style={{fontSize:12,fontWeight:600,marginBottom:4}}>Per serving (edit if the read is off)</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                  <input className="form-input" type="number" placeholder="cal" value={scanResult.calories}
+                    onChange={e=>setScanResult(r=>({...r,calories:e.target.value}))} style={{maxWidth:80}} />
+                  <input className="form-input" type="number" placeholder="carbs" value={scanResult.carbs}
+                    onChange={e=>setScanResult(r=>({...r,carbs:e.target.value}))} style={{maxWidth:80}} />
+                  <input className="form-input" type="number" placeholder="protein" value={scanResult.protein}
+                    onChange={e=>setScanResult(r=>({...r,protein:e.target.value}))} style={{maxWidth:80}} />
+                  <input className="form-input" type="number" placeholder="fat" value={scanResult.fat}
+                    onChange={e=>setScanResult(r=>({...r,fat:e.target.value}))} style={{maxWidth:80}} />
+                </div>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+                  <span style={{fontSize:13}}>
+                    {scanResult.unitCount ? `How many ${scanResult.unitName}?` : "Servings eaten"}
+                  </span>
+                  <input className="form-input" type="number" step="any" value={scanAmount}
+                    onChange={e=>setScanAmount(e.target.value)} style={{maxWidth:90}} />
+                </div>
+                <div style={{background:"var(--parchment)",borderRadius:6,padding:10,marginBottom:10,fontSize:13}}>
+                  <strong>{scaleScan(scanResult.calories) ?? "—"} cal</strong>
+                  {"  ·  "}{scaleScan(scanResult.carbs) ?? "—"}g carbs
+                  {"  ·  "}{scaleScan(scanResult.protein) ?? "—"}g protein
+                  {"  ·  "}{scaleScan(scanResult.fat) ?? "—"}g fat
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button className="btn btn-primary btn-sm" disabled={scanFactor<=0} onClick={addScanned}>+ Log it</button>
+                  <button className="btn btn-outline btn-sm" onClick={resetScan}>Start over</button>
+                </div>
+              </div>
+            )}
+
+            {scanError && (
+              <div style={{marginTop:10,fontSize:12,color:"var(--danger, #b3261e)"}}>{scanError}</div>
+            )}
+          </div>
         ):(
           <div>
             <input className="search-input" style={{width:"100%",marginBottom:8}} placeholder="Search your recipes…" value={recipeSearch} onChange={e=>{setRecipeSearch(e.target.value);setRecipeChosen(null);}} />
