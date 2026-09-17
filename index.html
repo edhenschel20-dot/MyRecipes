@@ -3553,6 +3553,83 @@ function shoppingBaseName(name) {
   return s || (name||"").trim();
 }
 
+// --- Sale Watch -----------------------------------------------------------
+// Matches shopping-list lines against this week's grocery flyers. The
+// deal-match Edge Function does a trigram prefilter then has Haiku confirm
+// each candidate, because substring matching alone happily returns "Peanut
+// Butter" for butter and "Spaghetti Squash" for spaghetti. Verdicts are
+// cached server-side per week, so repeat calls are cheap.
+
+// Must match the server's normalisation in deal-match exactly.
+function dealKey(name) {
+  return shoppingBaseName(name).trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function formatDealDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+}
+
+function DealBadge({ deal }) {
+  if (!deal || deal.price_cents == null) return null;
+  const price = "$" + (deal.price_cents / 100).toFixed(2);
+  const unit = deal.unit_basis === "lb" ? "/lb" : "";
+  const thru = formatDealDate(deal.valid_to);
+  return (
+    <div style={{fontSize:12,marginTop:2,color:"var(--saffron)",fontWeight:600}}>
+      🏷️ {price}{unit} at {deal.store}
+      {thru && <span style={{color:"var(--ink-light)",fontWeight:400}}> · thru {thru}</span>}
+    </div>
+  );
+}
+
+// Looks up deals for whatever is currently on the shopping list. Keyed on the
+// sorted name set so it only refires when the list actually changes, not on
+// every render. Failures are silent by design — a missing badge is fine, a
+// broken shopping list is not.
+function useDealBadges(shoppingList) {
+  const [deals, setDeals] = useState({});
+  const namesKey = useMemo(() => {
+    const names = (shoppingList || [])
+      .map(i => dealKey(i.name))
+      .filter(n => n && n.length > 2);
+    return [...new Set(names)].sort().join("|");
+  }, [shoppingList]);
+
+  useEffect(() => {
+    if (!namesKey) { setDeals({}); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/deal-match`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`
+          },
+          body: JSON.stringify({ names: namesKey.split("|") })
+        });
+        if (!res.ok || cancelled) return;
+        const json = await res.json();
+        if (cancelled) return;
+        const map = {};
+        (json.matches || []).forEach(m => {
+          const k = m.name || m.normalized_text;
+          if (k && m.price_cents != null) map[k] = m;
+        });
+        setDeals(map);
+      } catch (err) {
+        console.warn("[sale-watch] deal lookup failed:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [namesKey]);
+
+  return deals;
+}
+
 // Sums ingredient amounts (scaled by servings) across every non-leftover
 // calendar entry in [startDate, endDate], grouped by a cleaned shopping name
 // + unit. Leftover entries are skipped since they reuse an already-cooked
@@ -3760,6 +3837,7 @@ function PantryTab({ recipes, version }) {
     () => buildShoppingList(items, loadCalendar(), recipes||[], mealRangeStart, mealRangeEnd, usePackages, ingredientSubs),
     [items, recipes, mealRangeStart, mealRangeEnd, usePackages, ingredientSubs, version]
   );
+  const dealBadges = useDealBadges(shoppingList);
   const usedCats = [...new Set(filtered.map(i=>i.category||"Other"))].sort();
 
   // Group by category
@@ -3824,7 +3902,7 @@ function PantryTab({ recipes, version }) {
               </label>
             )}
           </div>
-          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} />
+          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} deals={dealBadges} />
         </>
       ) : (
         <>
@@ -3927,7 +4005,7 @@ function substituteCandidates(forIngredient, allPantryItems) {
   return [...related, ...rest];
 }
 
-function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute }) {
+function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute, deals }) {
   const [openSubFor, setOpenSubFor] = useState(null);
   const grouped = {};
   items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
@@ -3961,6 +4039,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
                   ? <div style={{fontSize:12,color:"var(--ink-light)"}}>Need {item.mealQty}{item.mealRecipes?` for ${item.mealRecipes}`:""}</div>
                   : (pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>)
                 }
+                <DealBadge deal={(deals||{})[dealKey(item.name)]} />
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {item.substitutionKey && (
