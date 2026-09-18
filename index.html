@@ -441,6 +441,19 @@ function sbHeaders() {
   };
 }
 
+// Fires the two server-side passes Cook Tonight depends on: parse any recipe
+// whose ingredients changed, then judge any ingredient the pantry has not been
+// checked against. Both are no-ops when there is nothing new, so calling this
+// on every save is cheap. Errors are swallowed by the caller — pg_cron runs
+// both again overnight.
+async function refreshParse() {
+  const call = (fn, body) => fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method: "POST", headers: sbHeaders(), body: JSON.stringify(body || {})
+  });
+  await call("ingredient-parse", { limit: 20 });
+  await call("pantry-match", { limit: 60 });
+}
+
 async function sbGet(table) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`, { headers: sbHeaders() });
   if (!res.ok) throw new Error(`Supabase GET ${table} failed: ${res.status}`);
@@ -1075,6 +1088,13 @@ function RecipeBook() {
         setSyncStatus("syncing");
         await sbUpsert("recipes", [recipeToRow(r)]);
         setSyncStatus("ok"); setTimeout(()=>setSyncStatus(""), 2000);
+        // Parse this recipe's ingredients now rather than waiting for the
+        // overnight job, so Cook Tonight sees a recipe the moment it is saved.
+        // Deliberately not awaited and deliberately silent: the nightly run is
+        // the backstop, and a save must never fail because a parse did.
+        // A trigger has already cleared parse_version if the ingredients
+        // changed, so an untouched recipe costs nothing here.
+        refreshParse().catch(()=>{});
       } catch(e) { setSyncStatus("error:" + e.message); setTimeout(()=>setSyncStatus(""), 5000); }
     }
     // If we're viewing this recipe, refresh it
@@ -1247,7 +1267,7 @@ function RecipeBook() {
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["tonight","🍳 Cook Tonight"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -1272,6 +1292,8 @@ function RecipeBook() {
           window.alert(`Added ${n} dinner${n===1?"":"s"} to the calendar. The Shopping tab will pick them up.`);
           setTab("calendar");
         }} />}
+        {tab==="tonight" && <CookTonight recipes={recipes} onOpen={setSelectedRecipe}
+           onCook={startCookMode} onPlanned={()=>setCalVersion(v=>v+1)} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} onStartMealCook={startMealCook} />}
         {tab==="foodlog" && <FoodLogTab recipes={recipes} />}
@@ -3582,6 +3604,228 @@ function formatDealDate(iso) {
   return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 
+// Sale Week shows the same verdicts the shopping list does, but compressed to
+// a mark — the chip row is already dense, and the full wording belongs where
+// there is room for it.
+const VERDICT_MARK = {
+  "best price you have seen": { icon: "\u2b50", color: "var(--sage)" },
+  "strong":                   { icon: "\u2705", color: "var(--sage)" },
+  "looks good (thin history)":{ icon: "\ud83d\udc4d", color: "var(--saffron)" },
+  "skip":                     { icon: "\u274c", color: "var(--rust)" },
+};
+
+// --- Cook tonight ---------------------------------------------------------
+// The question the app could never answer before: what can I make right now,
+// without going to the store?
+//
+// It leans on two pieces that landed earlier. `recipes.ingredients_parsed`
+// turns "2 lb chicken thick-cut breast, cut into 1.5 inch pieces" into a qty,
+// a unit and an item. `pantry_match` says which pantry rows each of those
+// items actually IS — judged by a model, because substring matching thinks
+// "onion" is Onion Powder, "butter" is a peanut butter protein bar, and
+// "ground beef" is Ground Sage.
+//
+// Stock STATUS is not cached: `recipe_readiness` reads it live, so marking
+// something out in the Pantry tab changes this list on the next refresh.
+//
+// Three deliberate choices about what counts as missing:
+//   - "low" does not block. If it is marked low there is probably enough for
+//     tonight, so it shows as a caution instead of a blocker.
+//   - Non-shopping items never block: water, toothpicks, wood chunks for the
+//     smoker. Otherwise half the Pit Boss recipes would read as un-makeable.
+//   - An ingredient with no verdict yet counts as UNKNOWN, never as missing
+//     and never as in stock. A recipe is not called makeable on the strength
+//     of ingredients nobody has checked.
+
+function useCookTonight(refreshKey) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/recipe_readiness?select=*&order=pct_in_stock.desc`,
+          { headers: sbHeaders() }
+        );
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!cancelled) { setRows(data || []); setError(""); }
+      } catch (err) {
+        if (!cancelled) { setError(err.message || String(err)); setRows([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
+  return { rows, error };
+}
+
+function MissingChips({ items, color }) {
+  if (!items || !items.length) return null;
+  return (
+    <div style={{display:"flex",flexWrap:"wrap",gap:"4px 8px",marginTop:4,minWidth:0}}>
+      {items.map((it, i) => (
+        <span key={i} style={{fontSize:12,color,whiteSpace:"nowrap"}}>{it}</span>
+      ))}
+    </div>
+  );
+}
+
+function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [rechecking, setRechecking] = useState(false);
+  const [note, setNote] = useState("");
+  const { rows, error } = useCookTonight(refreshKey);
+
+  const byId = useMemo(() => {
+    const m = {};
+    (recipes || []).forEach(r => { m[r.id] = r; });
+    return m;
+  }, [recipes]);
+
+  // Re-runs the matcher, which is what is needed after the pantry gains items.
+  // The pantry trigger has already dropped any verdict the change invalidated,
+  // so this only judges what actually needs judging.
+  async function recheck() {
+    setRechecking(true); setNote("");
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/pantry-match`, {
+        method: "POST", headers: sbHeaders(), body: JSON.stringify({ limit: 200 })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || res.status);
+      setNote(json.judged ? `Checked ${json.judged} ingredient${json.judged===1?"":"s"}.`
+                          : "Everything was already up to date.");
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      setNote("Recheck failed: " + (err.message || err));
+    } finally { setRechecking(false); }
+  }
+
+  async function planTonight(recipeId) {
+    const iso = new Date().toISOString().slice(0,10);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
+        method: "POST",
+        headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify([{ date: iso, slot: "dinner", recipe_id: recipeId,
+                                servings: 4, leftover: false,
+                                updated_at: new Date().toISOString() }])
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setNote("Added to tonight's dinner.");
+      if (onPlanned) onPlanned();
+    } catch (err) {
+      setNote("Couldn't add to the calendar: " + (err.message || err));
+    }
+  }
+
+  if (rows === null) {
+    return <div className="text-muted" style={{padding:"32px 0",textAlign:"center"}}>Checking the pantry…</div>;
+  }
+
+  // Only real recipes — readiness rows for deleted ones would be dead links.
+  const live = rows.filter(r => byId[r.recipe_id] && r.needed > 0);
+
+  const ready   = live.filter(r => r.can_make_now);
+  const close   = live.filter(r => !r.can_make_now && r.missing_count > 0 && r.missing_count <= 2)
+                      .sort((a,b) => a.missing_count - b.missing_count || b.pct_in_stock - a.pct_in_stock);
+  const distant = live.filter(r => !r.can_make_now && (r.missing_count > 2 || r.missing_count === 0))
+                      .sort((a,b) => b.pct_in_stock - a.pct_in_stock);
+
+  function Row({ r }) {
+    const recipe = byId[r.recipe_id];
+    return (
+      <div style={{padding:"11px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 200px",minWidth:0}}>
+            <div style={{fontWeight:700,fontSize:16,cursor:"pointer"}}
+                 onClick={() => onOpen && onOpen(recipe)}>
+              {recipe.favorite && "⭐ "}{r.title}
+            </div>
+            <div style={{fontSize:12,color:"var(--ink-light)",marginTop:2}}>
+              {r.have_count} of {r.needed} on hand
+              {r.not_needed_count > 0 && ` · ${r.not_needed_count} not a shopping item`}
+            </div>
+            <MissingChips items={r.missing_items} color="var(--rust)" />
+            <MissingChips items={r.low_items} color="var(--saffron)" />
+            {r.unknown_count > 0 && (
+              <div style={{fontSize:11,color:"var(--ink-light)",marginTop:3}}>
+                {r.unknown_count} ingredient{r.unknown_count===1?"":"s"} not checked yet
+              </div>
+            )}
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {r.can_make_now && (
+              <button className="btn btn-outline btn-sm" onClick={() => planTonight(r.recipe_id)}>
+                📅 Tonight
+              </button>
+            )}
+            <button className="btn btn-outline btn-sm" onClick={() => onCook && onCook(recipe, 1)}>
+              👨‍🍳 Cook
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function Section({ title, subtitle, list }) {
+    if (!list.length) return null;
+    return (
+      <div style={{marginBottom:26}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
+          {title} <span style={{color:"var(--ink-light)",fontWeight:400}}>({list.length})</span>
+        </div>
+        <p className="text-muted" style={{margin:"2px 0 6px"}}>{subtitle}</p>
+        {list.map(r => <Row key={r.recipe_id} r={r} />)}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",
+                   flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>
+            🍳 Cook tonight
+          </div>
+          <p className="text-muted">
+            {ready.length > 0
+              ? `${ready.length} recipe${ready.length===1?"":"s"} you can make without leaving the house.`
+              : "Nothing is fully stocked right now — here's what's closest."}
+          </p>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={recheck} disabled={rechecking}>
+          {rechecking ? "Checking…" : "↻ Recheck pantry"}
+        </button>
+      </div>
+
+      {note && <div style={{fontSize:13,color:"var(--sage)",marginBottom:10}}>{note}</div>}
+      {error && <div style={{fontSize:13,color:"var(--rust)",marginBottom:10}}>Couldn't load: {error}</div>}
+
+      {!live.length && (
+        <div className="empty-state">
+          <div className="empty-icon">🍳</div>
+          <div className="empty-title">Nothing to compare yet</div>
+          <p>Ingredients get parsed overnight and matched against the pantry.
+             Press "Recheck pantry" to run it now.</p>
+        </div>
+      )}
+
+      <Section title="Ready now" list={ready}
+               subtitle="Everything these need is in the pantry." />
+      <Section title="One or two short" list={close}
+               subtitle="Close enough that one stop finishes them." />
+      <Section title="Needs a shop" list={distant}
+               subtitle="Sorted by how much of it you already have." />
+    </div>
+  );
+}
+
 // --- Plan the week around what's on sale ----------------------------------
 // A proposal, not a report. A list of deals leaves the thinking to you; a
 // proposed week leaves you approving or swapping. That difference is what
@@ -3750,11 +3994,16 @@ function SaleWeekPlanner({ recipes, onPlanned }) {
                     Flex with wrap gives the row real break points. */}
                 <div style={{fontSize:12,color:"var(--saffron)",marginTop:4,fontWeight:600,
                              display:"flex",flexWrap:"wrap",gap:"4px 10px",minWidth:0}}>
-                  {(p.deals||[]).map((d,j) => (
-                    <span key={j} style={{whiteSpace:"nowrap"}}>
-                      {d.name} ${(d.price_cents/100).toFixed(2)}{d.unit_basis==="lb"?"/lb":""} @{d.store}
-                    </span>
-                  ))}
+                  {(p.deals||[]).map((d,j) => {
+                    const mark = VERDICT_MARK[d.verdict];
+                    return (
+                      <span key={j} style={{whiteSpace:"nowrap", color: mark ? mark.color : undefined}}>
+                        {mark ? mark.icon + " " : ""}
+                        {d.name} ${(d.price_cents/100).toFixed(2)}{d.unit_basis==="lb"?"/lb":""} @{d.store}
+                        {d.pct_below_usual > 0 ? ` (${d.pct_below_usual}% off your usual)` : ""}
+                      </span>
+                    );
+                  })}
                 </div>
                 {expiring.length > 0 && (
                   <div style={{fontSize:11,color:"var(--chili,#b3402f)",marginTop:3}}>
