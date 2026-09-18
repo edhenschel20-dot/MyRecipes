@@ -4283,17 +4283,88 @@ function FlyerCoverage() {
   );
 }
 
-function DealBadge({ deal }) {
+// How a verdict renders. The wording is deliberately plain: "best price you
+// have seen" is a claim about Ed's own receipts, not a marketing adjective.
+const VERDICT_STYLE = {
+  "best price you have seen": { icon: "\u2b50", color: "var(--sage)",       label: "best price you've seen" },
+  "strong":                   { icon: "\u2705", color: "var(--sage)",       label: "well under your usual" },
+  "looks good (thin history)":{ icon: "\ud83d\udc4d", color: "var(--saffron)", label: "looks good" },
+  "ordinary":                 { icon: "\u2796", color: "var(--ink-light)",  label: "about what you pay" },
+  "unclear (thin history)":   { icon: "\u2753", color: "var(--ink-light)",  label: "unclear" },
+  "skip":                     { icon: "\u274c", color: "var(--rust)",       label: "above your usual" },
+};
+
+function centsPer(v) {
+  if (v == null) return null;
+  const n = Number(v);
+  if (!isFinite(n)) return null;
+  // Sub-dollar unit prices read better in cents.
+  return n < 100 ? `${n.toFixed(n < 10 ? 2 : 1)}\u00a2` : "$" + (n / 100).toFixed(2);
+}
+
+function DealBadge({ deal, verdict }) {
   if (!deal || deal.price_cents == null) return null;
   const price = "$" + (deal.price_cents / 100).toFixed(2);
   const unit = deal.unit_basis === "lb" ? "/lb" : "";
   const thru = formatDealDate(deal.valid_to);
+  const v = verdict && VERDICT_STYLE[verdict.verdict];
+  const adUnit = verdict && centsPer(verdict.ad_unit_cents);
+  const usual  = verdict && centsPer(verdict.your_median_cents);
+
   return (
-    <div style={{fontSize:12,marginTop:2,color:"var(--saffron)",fontWeight:600}}>
-      🏷️ {price}{unit} at {deal.store}
-      {thru && <span style={{color:"var(--ink-light)",fontWeight:400}}> · thru {thru}</span>}
+    <div style={{marginTop:2}}>
+      <div style={{fontSize:12,color:"var(--saffron)",fontWeight:600}}>
+        🏷️ {price}{unit} at {deal.store}
+        {thru && <span style={{color:"var(--ink-light)",fontWeight:400}}> · thru {thru}</span>}
+      </div>
+      {v && (
+        <div style={{fontSize:12,color:v.color,fontWeight:600,marginTop:1}}>
+          {v.icon} {v.label}
+          {adUnit && usual && verdict.ad_unit && (
+            <span style={{color:"var(--ink-light)",fontWeight:400}}>
+              {" \u00b7 "}{adUnit}/{verdict.ad_unit} vs {usual} you usually pay
+              {verdict.pct_below_usual > 0 ? ` (${verdict.pct_below_usual}% less)` : ""}
+            </span>
+          )}
+          {verdict.thin_history && (
+            <span style={{color:"var(--ink-light)",fontWeight:400}}>
+              {" \u00b7 "}only {verdict.n_observations || 0} past purchase{(verdict.n_observations||0)===1?"":"s"}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+// Verdicts compare this week's ad price against what Ed has actually paid,
+// from `deal_verdict`. Read straight from the view — no Edge Function, no
+// model call, so it costs one GET and can refresh whenever the tab opens.
+// Silent on failure: a missing verdict just means the badge shows the plain
+// price, which is what it did before this existed.
+function useDealVerdicts() {
+  const [verdicts, setVerdicts] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/deal_verdict?select=name,store,ad_unit,ad_unit_cents,your_median_cents,your_best_cents,n_observations,thin_history,verdict,pct_below_usual,size_source`,
+          { headers: sbHeaders() }
+        );
+        if (!res.ok || cancelled) return;
+        const rows = await res.json();
+        if (cancelled) return;
+        const map = {};
+        (rows || []).forEach(r => { if (r && r.name) map[r.name] = r; });
+        setVerdicts(map);
+      } catch (err) {
+        console.warn("[sale-watch] verdict lookup failed:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return verdicts;
 }
 
 // Looks up deals for whatever is currently on the shopping list. Keyed on the
@@ -4552,6 +4623,7 @@ function PantryTab({ recipes, version }) {
     [items, recipes, mealRangeStart, mealRangeEnd, usePackages, ingredientSubs, version]
   );
   const dealBadges = useDealBadges(shoppingList);
+  const dealVerdicts = useDealVerdicts();
   const usedCats = [...new Set(filtered.map(i=>i.category||"Other"))].sort();
 
   // Group by category
@@ -4617,7 +4689,7 @@ function PantryTab({ recipes, version }) {
               </label>
             )}
           </div>
-          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} deals={dealBadges} />
+          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} deals={dealBadges} verdicts={dealVerdicts} />
         </>
       ) : (
         <>
@@ -4738,7 +4810,7 @@ function substituteCandidates(forIngredient, allPantryItems) {
   return [...related, ...rest];
 }
 
-function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute, deals }) {
+function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute, deals, verdicts }) {
   const [openSubFor, setOpenSubFor] = useState(null);
   const grouped = {};
   items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
@@ -4775,7 +4847,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
                   ? <div style={{fontSize:12,color:"var(--ink-light)"}}>Need {item.mealQty}{item.mealRecipes?` for ${item.mealRecipes}`:""}</div>
                   : (pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>)
                 }
-                <DealBadge deal={(deals||{})[dealKey(item.name)]} />
+                <DealBadge deal={(deals||{})[dealKey(item.name)]} verdict={(verdicts||{})[dealKey(item.name)]} />
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {item.substitutionKey && (
