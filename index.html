@@ -3571,6 +3571,335 @@ function formatDealDate(iso) {
   return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 
+// --- Price import ---------------------------------------------------------
+// Turns a photo into price_observation rows. Feed it a paper receipt, or a
+// screenshot of an order screen in the Walmart / Jewel / Target app — the
+// screenshot is better source material, because the text is clean and usually
+// carries the pack size the paper receipt omits.
+//
+// Receipts often print "GV PPR TWL 8.97" with no count, and without a count
+// there is no per-unit price and the row can't serve as a baseline. So rows
+// missing a quantity are flagged and editable rather than silently stored.
+
+const PACK_UNITS = ["", "lb", "oz", "each", "ct", "bag", "roll", "sheet", "load", "fl oz", "gal"];
+
+function PriceImport({ stores, onClose, onSaved }) {
+  const [phase, setPhase] = useState("pick");     // pick | scanning | review
+  const [rows, setRows] = useState([]);
+  const [storeName, setStoreName] = useState("");
+  const [observedOn, setObservedOn] = useState(new Date().toISOString().slice(0,10));
+  const [error, setError] = useState("");
+  const fileInputRef = useRef(null);
+
+  const fileToBase64 = file => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(",")[1]);
+    r.onerror = () => rej(new Error("Read failed"));
+    r.readAsDataURL(file);
+  });
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files||[]);
+    if (!files.length) return;
+    setPhase("scanning"); setError("");
+    try {
+      const images = await Promise.all(files.map(async f => ({
+        type: "image",
+        source: { type: "base64", media_type: f.type||"image/jpeg", data: await fileToBase64(f) }
+      })));
+
+      const prompt = "These images are grocery receipts or screenshots of an order/purchase screen from a store app or website. "
+        + "Extract every purchased line item. Return ONLY a JSON object, no markdown:\n"
+        + '{"store":"Walmart","date":"2026-09-14","items":[{"name":"paper towels","description":"GV PPR TWL 6PK","price":8.97,"qty":1,"pack_qty":6,"pack_unit":"roll"}]}\n'
+        + "Rules: store = the retailer name if visible, else empty string. date = purchase date as YYYY-MM-DD if visible, else empty string. "
+        + "name = short generic product name, brand and store names stripped ('GV PPR TWL 6PK' becomes 'paper towels', "
+        + "'KRO BNLS SKNLS CHKN BRST' becomes 'chicken breast'). description = the raw line text as printed. "
+        + "price = the price actually paid for that line as a number. qty = number of that line purchased (default 1). "
+        + "pack_qty = the count or weight in the package as a number (6 for a 6-pack, 12 for 12 oz, 1.89 for 1.89 lb) — "
+        + "OMIT this field entirely if the package size is not visible; do not guess. "
+        + "pack_unit = one of lb, oz, each, ct, bag, roll, sheet, load, fl oz, gal — omit if unknown. "
+        + "Skip subtotals, tax, totals, coupons, bag fees and loyalty savings lines.";
+
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+        method: "POST",
+        headers: { ...sbHeaders(), "x-claude-secret": "henschel-claude-2026" },
+        body: JSON.stringify({ action:"ai", content:[...images, {type:"text",text:prompt}], max_tokens: 4000 })
+      });
+      const wrapper = await res.json();
+      if (wrapper.error) throw new Error(wrapper.error);
+      const text = ((wrapper.data||{}).content||[]).map(b=>b.text||"").join("");
+      const clean = text.replace(/```json|```/g,"").trim();
+
+      let parsed;
+      try { parsed = JSON.parse(clean); }
+      catch {
+        const m = clean.match(/\{[\s\S]*\}/);
+        if (!m) throw new Error("could not read the response");
+        parsed = JSON.parse(m[0]);
+      }
+
+      if (parsed.store) setStoreName(parsed.store);
+      if (parsed.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) setObservedOn(parsed.date);
+
+      setRows((parsed.items||[]).map(it => ({
+        keep: true,
+        name: it.name || "",
+        description: it.description || it.name || "",
+        price: it.price != null ? String(it.price) : "",
+        pack_qty: it.pack_qty != null ? String(it.pack_qty) : "",
+        pack_unit: it.pack_unit || ""
+      })));
+      setPhase("review");
+    } catch (err) {
+      setError("Scan failed: " + err.message);
+      setPhase("pick");
+    }
+  }
+
+  const update = (i, k, v) => setRows(prev => prev.map((r,idx)=> idx===i ? {...r,[k]:v} : r));
+
+  async function save() {
+    const keep = rows.filter(r => r.keep && r.name.trim() && r.price !== "");
+    if (!keep.length) { onClose(); return; }
+    try {
+      // Create any watch items we don't have yet, then read back every id.
+      const names = [...new Set(keep.map(r => r.name.trim().toLowerCase()))];
+      await fetch(`${SUPABASE_URL}/rest/v1/watch_item`, {
+        method: "POST",
+        headers: { ...sbHeaders(), Prefer: "resolution=ignore-duplicates" },
+        body: JSON.stringify(names.map(n => ({ name: n, source: "manual", kind: "household" })))
+      });
+      const listed = await fetch(
+        `${SUPABASE_URL}/rest/v1/watch_item?select=id,name&name=in.(${names.map(n=>`"${n.replace(/"/g,'')}"`).join(",")})`,
+        { headers: sbHeaders() }
+      ).then(r => r.json());
+      const idByName = {};
+      (listed||[]).forEach(w => { idByName[w.name] = w.id; });
+
+      const store = (stores||[]).find(s => (s.store||s.name||"").toLowerCase() === storeName.trim().toLowerCase());
+
+      const obs = keep.map(r => ({
+        watch_item_id: idByName[r.name.trim().toLowerCase()] || null,
+        store_id: store ? (store.store_id || store.id) : null,
+        store_name: storeName.trim() || null,
+        description: r.description || r.name,
+        price_cents: Math.round(parseFloat(r.price) * 100),
+        pack_qty: r.pack_qty === "" ? null : parseFloat(r.pack_qty),
+        pack_unit: r.pack_unit || null,
+        observed_on: observedOn,
+        kind: "paid",
+        source: "photo"
+      })).filter(o => Number.isFinite(o.price_cents));
+
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/price_observation`, {
+        method: "POST", headers: sbHeaders(), body: JSON.stringify(obs)
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (onSaved) onSaved(obs.length);
+      onClose();
+    } catch (err) {
+      setError("Save failed: " + err.message);
+    }
+  }
+
+  const missingQty = rows.filter(r => r.keep && !r.pack_qty).length;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{maxWidth:680}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">🧾 Import prices</div>
+
+        {error && <div style={{color:"var(--chili,#b3402f)",marginBottom:10,fontSize:13}}>{error}</div>}
+
+        {phase === "pick" && (
+          <div style={{padding:"8px 0"}}>
+            <p className="text-muted" style={{marginBottom:14}}>
+              Photograph a receipt, or screenshot the order screen in the Walmart, Jewel,
+              Target or Sam's app. Screenshots read better — they usually include the
+              package size that paper receipts leave off.
+            </p>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple
+                   onChange={handleFiles}
+                   style={{width:"0.1px",height:"0.1px",position:"absolute",zIndex:-1}} id="price-import-file" />
+            <label htmlFor="price-import-file" className="btn btn-primary" style={{cursor:"pointer"}}>
+              📷 Choose photos
+            </label>
+          </div>
+        )}
+
+        {phase === "scanning" && (
+          <div style={{padding:"24px 0",textAlign:"center"}} className="text-muted">Reading…</div>
+        )}
+
+        {phase === "review" && (
+          <div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
+              <label style={{fontSize:12}}>
+                <div className="text-muted">Store</div>
+                <input className="filter-select" value={storeName}
+                       onChange={e=>setStoreName(e.target.value)} placeholder="Walmart" />
+              </label>
+              <label style={{fontSize:12}}>
+                <div className="text-muted">Date</div>
+                <input className="filter-select" type="date" value={observedOn}
+                       onChange={e=>setObservedOn(e.target.value)} />
+              </label>
+            </div>
+
+            {missingQty > 0 && (
+              <div style={{fontSize:12,color:"var(--chili,#b3402f)",marginBottom:8}}>
+                {missingQty} {missingQty===1?"line is":"lines are"} missing a package size. Fill those
+                in to get a per-unit price — without it the line still saves, but it can't be compared
+                against a sale.
+              </div>
+            )}
+
+            <div style={{maxHeight:340,overflowY:"auto"}}>
+              {rows.map((r,i) => (
+                <div key={i} style={{display:"flex",gap:6,alignItems:"center",padding:"6px 0",
+                                     borderBottom:"1px dashed var(--parchment-dark)",
+                                     opacity: r.keep ? 1 : 0.4}}>
+                  <input type="checkbox" checked={r.keep} onChange={e=>update(i,"keep",e.target.checked)} />
+                  <input className="filter-select" style={{flex:2,minWidth:0}} value={r.name}
+                         onChange={e=>update(i,"name",e.target.value)} placeholder="item" />
+                  <input className="filter-select" style={{width:70}} value={r.price} inputMode="decimal"
+                         onChange={e=>update(i,"price",e.target.value)} placeholder="$" />
+                  <input className="filter-select"
+                         style={{width:62, borderColor: r.keep && !r.pack_qty ? "var(--chili,#b3402f)" : undefined}}
+                         value={r.pack_qty} inputMode="decimal"
+                         onChange={e=>update(i,"pack_qty",e.target.value)} placeholder="qty" />
+                  <select className="filter-select" style={{width:82}} value={r.pack_unit}
+                          onChange={e=>update(i,"pack_unit",e.target.value)}>
+                    {PACK_UNITS.map(u => <option key={u} value={u}>{u || "unit"}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div style={{marginTop:8,fontSize:11}} className="text-muted">
+              {rows.filter(r=>r.keep).length} of {rows.length} lines will be saved. Uncheck anything
+              that isn't a grocery item.
+            </div>
+
+            <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
+              <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={save}>Save prices</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Collapsible footer listing which store ads are loaded and how current they
+// are. This exists so a broken fetch never looks like "nothing is on sale" —
+// silence that reads as no-deals is the one failure mode that would make the
+// whole feature untrustworthy.
+function FlyerCoverage() {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/flyer_coverage?select=*&order=sort_order`,
+          { headers: sbHeaders() }
+        );
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setRows(data);
+      } catch (err) {
+        console.warn("[sale-watch] coverage lookup failed:", err);
+        if (!cancelled) setRows([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!rows) return null;
+
+  const flyerStores = rows.filter(r => (r.roles || []).includes("flyer"));
+  const otherStores = rows.filter(r => !(r.roles || []).includes("flyer"));
+  const totalItems = flyerStores.reduce((n, r) => n + (r.live_items || 0), 0);
+  const problems = flyerStores.filter(r => !r.live_items || r.last_status === "failed");
+
+  const fmt = iso => {
+    if (!iso) return "—";
+    const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
+    return isNaN(d) ? "—" : d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+  };
+  const fmtWhen = iso => {
+    if (!iso) return "never";
+    const d = new Date(iso);
+    if (isNaN(d)) return "never";
+    const hrs = (Date.now() - d.getTime()) / 3600000;
+    if (hrs < 1) return "just now";
+    if (hrs < 24) return Math.round(hrs) + "h ago";
+    return Math.round(hrs / 24) + "d ago";
+  };
+
+  return (
+    <div style={{marginTop:24,paddingTop:12,borderTop:"1px solid var(--parchment-dark)"}}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                cursor:"pointer",fontSize:12,color:"var(--ink-light)"}}
+      >
+        <span>
+          📰 Store ads · {flyerStores.length - problems.length}/{flyerStores.length} loaded
+          {totalItems > 0 && ` · ${totalItems.toLocaleString()} items`}
+          {problems.length > 0 && <span style={{color:"var(--chili,#b3402f)",fontWeight:600}}> · {problems.length} missing</span>}
+        </span>
+        <span style={{fontSize:10}}>{open ? "▲" : "▼"}</span>
+      </div>
+
+      {open && (
+        <div style={{marginTop:10,fontSize:12}}>
+          {flyerStores.map(r => {
+            const bad = !r.live_items || r.last_status === "failed";
+            return (
+              <div key={r.store_id}
+                   style={{display:"flex",justifyContent:"space-between",gap:8,
+                           padding:"4px 0",borderBottom:"1px dotted var(--parchment-dark)"}}>
+                <span style={{fontWeight:600,color:bad?"var(--chili,#b3402f)":"inherit"}}>
+                  {bad ? "⚠️ " : "✓ "}{r.store}
+                </span>
+                <span style={{color:"var(--ink-light)",textAlign:"right"}}>
+                  {r.live_items ? `${r.live_items} items · ${fmt(r.valid_from)}–${fmt(r.valid_to)}` : "no current ad"}
+                  {" · "}{fmtWhen(r.last_fetch)}
+                </span>
+              </div>
+            );
+          })}
+
+          {otherStores.length > 0 && (
+            <div style={{marginTop:8,color:"var(--ink-light)",fontStyle:"italic"}}>
+              No weekly ad published for {otherStores.map(r => r.store).join(", ")} — these are
+              price-comparison sources only.
+            </div>
+          )}
+
+          {problems.some(p => p.last_error) && (
+            <div style={{marginTop:8,color:"var(--chili,#b3402f)"}}>
+              {problems.filter(p => p.last_error).map(p => (
+                <div key={p.store_id}>{p.store}: {p.last_error}</div>
+              ))}
+            </div>
+          )}
+
+          <div style={{marginTop:8,color:"var(--ink-light)"}}>
+            Ads refresh daily at 6am. Jewel, Mariano's, Meijer and ALDI change over on
+            Wednesdays; Target changes on Sundays.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DealBadge({ deal }) {
   if (!deal || deal.price_cents == null) return null;
   const price = "$" + (deal.price_cents / 100).toFixed(2);
@@ -3758,6 +4087,8 @@ function PantryTab({ recipes, version }) {
   const [editItem, setEditItem] = useState(null);
   const [expandedCats, setExpandedCats] = useState({});
   const [showPhotoImport, setShowPhotoImport] = useState(false);
+  const [showPriceImport, setShowPriceImport] = useState(false);
+  const [priceSaved, setPriceSaved] = useState(0);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [showReview, setShowReview] = useState(false);
   const [mealRangeStart, setMealRangeStart] = useState("");
@@ -3866,6 +4197,7 @@ function PantryTab({ recipes, version }) {
           </button>
           <button className="btn btn-primary btn-sm" onClick={()=>{setEditItem(null);setShowAdd(true);}}>+ Add Item</button>
           <button className="btn btn-outline btn-sm" onClick={()=>setShowPhotoImport(true)}>📷 Photo Import</button>
+          <button className="btn btn-outline btn-sm" onClick={()=>setShowPriceImport(true)}>🧾 Import Prices</button>
         </div>
       </div>
 
@@ -3979,6 +4311,20 @@ function PantryTab({ recipes, version }) {
           onClose={()=>setShowPhotoImport(false)}
         />
       )}
+      {showPriceImport && (
+        <PriceImport
+          onClose={()=>setShowPriceImport(false)}
+          onSaved={n=>setPriceSaved(n)}
+        />
+      )}
+      {priceSaved > 0 && (
+        <div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",
+                     background:"var(--ink,#2b2b2b)",color:"#fff",padding:"10px 16px",
+                     borderRadius:8,fontSize:13,zIndex:9999}}
+             onClick={()=>setPriceSaved(0)}>
+          Saved {priceSaved} price{priceSaved===1?"":"s"} · tap to dismiss
+        </div>
+      )}
       {showReview && (
         <PantryReviewModal
           queue={reviewQueue}
@@ -4011,10 +4357,13 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
   items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
 
   if(items.length===0) return (
-    <div className="empty-state">
-      <div className="empty-icon">🛒</div>
-      <div className="empty-title">Shopping list is clear!</div>
-      <p>Items marked "Running low" or "Out" will appear here{showingMeals?", along with anything needed for your planned meals":""}.</p>
+    <div>
+      <div className="empty-state">
+        <div className="empty-icon">🛒</div>
+        <div className="empty-title">Shopping list is clear!</div>
+        <p>Items marked "Running low" or "Out" will appear here{showingMeals?", along with anything needed for your planned meals":""}.</p>
+      </div>
+      <FlyerCoverage />
     </div>
   );
 
@@ -4069,6 +4418,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
           ))}
         </div>
       ))}
+      <FlyerCoverage />
     </div>
   );
 }
