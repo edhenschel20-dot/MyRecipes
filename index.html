@@ -1241,7 +1241,7 @@ function RecipeBook() {
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -1260,6 +1260,11 @@ function RecipeBook() {
             if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
           }
           upsertRecipe(r); setEditRecipe(r); setTab("library");
+        }} />}
+        {tab==="saleweek" && <SaleWeekPlanner recipes={recipes} onPlanned={n=>{
+          setCalVersion(v=>v+1);
+          window.alert(`Added ${n} dinner${n===1?"":"s"} to the calendar. The Shopping tab will pick them up.`);
+          setTab("calendar");
         }} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} onStartMealCook={startMealCook} />}
@@ -3571,6 +3576,200 @@ function formatDealDate(iso) {
   return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
 }
 
+// --- Plan the week around what's on sale ----------------------------------
+// A proposal, not a report. A list of deals leaves the thinking to you; a
+// proposed week leaves you approving or swapping. That difference is what
+// decides whether this gets used past November.
+//
+// Available any day. Ads refresh daily and flip on Wednesday (Target Sunday),
+// so planning Thursday night is fine — it just proposes a week from Thursday.
+
+function SaleWeekPlanner({ recipes, onPlanned }) {
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [nights, setNights] = useState(5);
+  const [candidates, setCandidates] = useState(null);
+  const [plan, setPlan] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [seed, setSeed] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/recipe_deal_rank`, {
+          method: "POST", headers: sbHeaders(), body: "{}"
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!cancelled) setCandidates(data || []);
+      } catch (err) {
+        if (!cancelled) { setError("Couldn't load deals: " + err.message); setCandidates([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Pick `nights` recipes, preferring high scores but refusing to serve the
+  // same protein twice until every protein has had a turn.
+  useEffect(() => {
+    if (!candidates) return;
+    const pool = [...candidates];
+    // Light shuffle within score bands so "Shuffle" gives a different week
+    // without ever promoting a bad match over a good one.
+    pool.sort((a,b) => (b.score - a.score) || (((a.recipe_id+seed).length % 7) - ((b.recipe_id+seed).length % 7)));
+
+    const picked = [], usedProtein = new Set(), usedTitle = new Set();
+    for (const pass of [1,2]) {
+      for (const c of pool) {
+        if (picked.length >= nights) break;
+        if (usedTitle.has(c.title)) continue;
+        if (pass === 1 && usedProtein.has(c.protein)) continue;
+        picked.push(c); usedProtein.add(c.protein); usedTitle.add(c.title);
+      }
+    }
+    setPlan(picked.slice(0, nights));
+  }, [candidates, nights, seed]);
+
+  const dayLabel = i => {
+    const d = new Date(startDate + "T00:00:00");
+    d.setDate(d.getDate() + i);
+    return { iso: d.toISOString().slice(0,10),
+             label: d.toLocaleDateString(undefined,{weekday:"short", month:"numeric", day:"numeric"}) };
+  };
+
+  // A deal that dies before you'd cook it isn't a reason to plan the meal.
+  const expiringBefore = (deals, iso) =>
+    (deals||[]).filter(d => d.valid_to && d.valid_to < iso);
+
+  function swap(idx) {
+    const inPlan = new Set(plan.map(p => p.recipe_id));
+    const alt = (candidates||[]).find(c =>
+      !inPlan.has(c.recipe_id) && c.protein !== plan[idx].protein) ||
+      (candidates||[]).find(c => !inPlan.has(c.recipe_id));
+    if (!alt) return;
+    setPlan(prev => prev.map((p,i) => i===idx ? alt : p));
+  }
+
+  function removeRow(idx) { setPlan(prev => prev.filter((_,i) => i!==idx)); }
+
+  async function accept() {
+    setSaving(true); setError("");
+    try {
+      const rows = plan.map((p,i) => ({
+        date: dayLabel(i).iso, slot: "dinner",
+        recipe_id: p.recipe_id, servings: 4, leftover: false,
+        updated_at: new Date().toISOString()
+      }));
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
+        method: "POST",
+        headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(rows)
+      });
+      if (!res.ok) throw new Error(await res.text());
+      if (onPlanned) onPlanned(rows.length);
+    } catch (err) {
+      setError("Couldn't save the plan: " + err.message);
+    } finally { setSaving(false); }
+  }
+
+  if (candidates === null) {
+    return <div className="text-muted" style={{padding:"32px 0",textAlign:"center"}}>Checking this week's ads…</div>;
+  }
+
+  if (!candidates.length) {
+    return (
+      <div className="empty-state">
+        <div className="empty-icon">🏷️</div>
+        <div className="empty-title">Nothing matched yet</div>
+        <p>No recipe ingredients matched this week's ads. Open the Shopping tab once to
+           prime the match cache, then come back.</p>
+        {error && <p style={{color:"var(--chili,#b3402f)"}}>{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",
+                   flexWrap:"wrap",gap:12,marginBottom:16}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>
+            🏷️ Plan around the sales
+          </div>
+          <p className="text-muted">
+            {candidates.length} of your recipes use something that's on sale right now.
+          </p>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <label style={{fontSize:12}}>
+            <div className="text-muted">Starting</div>
+            <input className="filter-select" type="date" value={startDate}
+                   onChange={e=>setStartDate(e.target.value)} />
+          </label>
+          <label style={{fontSize:12}}>
+            <div className="text-muted">Dinners</div>
+            <select className="filter-select" value={nights}
+                    onChange={e=>setNights(Number(e.target.value))}>
+              {[3,4,5,6,7].map(n=><option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <button className="btn btn-outline btn-sm" onClick={()=>setSeed(s=>s+1)}>🔀 Shuffle</button>
+        </div>
+      </div>
+
+      {error && <div style={{color:"var(--chili,#b3402f)",marginBottom:10,fontSize:13}}>{error}</div>}
+
+      {plan.map((p, i) => {
+        const day = dayLabel(i);
+        const expiring = expiringBefore(p.deals, day.iso);
+        return (
+          <div key={p.recipe_id+"-"+i}
+               style={{padding:"12px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:1.5,
+                             color:"var(--ink-light)",fontFamily:"'Special Elite',monospace"}}>
+                  {day.label}
+                </div>
+                <div style={{fontWeight:700,fontSize:16,marginTop:2}}>
+                  {p.favorite && "⭐ "}{p.title}
+                </div>
+                <div style={{fontSize:12,color:"var(--saffron)",marginTop:4,fontWeight:600}}>
+                  {(p.deals||[]).map((d,j) => (
+                    <span key={j} style={{marginRight:10,whiteSpace:"nowrap"}}>
+                      {d.name} ${(d.price_cents/100).toFixed(2)}{d.unit_basis==="lb"?"/lb":""} @{d.store}
+                    </span>
+                  ))}
+                </div>
+                {expiring.length > 0 && (
+                  <div style={{fontSize:11,color:"var(--chili,#b3402f)",marginTop:3}}>
+                    ⚠️ {expiring.map(d=>d.name).join(", ")} — sale ends before {day.label}. Cook it earlier or swap.
+                  </div>
+                )}
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button className="btn btn-outline btn-sm" onClick={()=>swap(i)}>Swap</button>
+                <button className="btn-icon" style={{color:"var(--rust)"}} onClick={()=>removeRow(i)}>✕</button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:18,alignItems:"center"}}>
+        <span className="text-muted" style={{fontSize:12,marginRight:"auto"}}>
+          Adds {plan.length} dinner{plan.length===1?"":"s"} to the calendar. The shopping list
+          builds itself from there.
+        </span>
+        <button className="btn btn-primary" disabled={saving||!plan.length} onClick={accept}>
+          {saving ? "Saving…" : "Looks good"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // --- Price import ---------------------------------------------------------
 // Turns a photo into price_observation rows. Feed it a paper receipt, or a
 // screenshot of an order screen in the Walmart / Jewel / Target app — the
@@ -3583,13 +3782,25 @@ function formatDealDate(iso) {
 
 const PACK_UNITS = ["", "lb", "oz", "each", "ct", "bag", "roll", "sheet", "load", "fl oz", "gal"];
 
-function PriceImport({ stores, onClose, onSaved }) {
+function PriceImport({ stores, pantryItems, onRestock, onClose, onSaved }) {
   const [phase, setPhase] = useState("pick");     // pick | scanning | review
   const [rows, setRows] = useState([]);
   const [storeName, setStoreName] = useState("");
   const [observedOn, setObservedOn] = useState(new Date().toISOString().slice(0,10));
+  const [restock, setRestock] = useState(true);
   const [error, setError] = useState("");
   const fileInputRef = useRef(null);
+
+  // A receipt is proof you bought the thing, which makes it the cheapest way
+  // to keep the pantry honest. Without this the statuses drift, the shopping
+  // list goes wrong, and everything downstream quietly stops working.
+  const pantryMatch = name => {
+    const list = pantryItems || [];
+    return findExistingPantryMatch(list, name, "Other")
+        || list.find(p => (p.name||"").toLowerCase().trim() === (name||"").toLowerCase().trim())
+        || list.find(p => fuzzyIngredientMatch(name, p.name))
+        || null;
+  };
 
   const fileToBase64 = file => new Promise((res, rej) => {
     const r = new FileReader();
@@ -3695,7 +3906,19 @@ function PriceImport({ stores, onClose, onSaved }) {
         method: "POST", headers: sbHeaders(), body: JSON.stringify(obs)
       });
       if (!res.ok) throw new Error(await res.text());
-      if (onSaved) onSaved(obs.length);
+
+      let restocked = 0;
+      if (restock && onRestock) {
+        const seen = new Set();
+        keep.forEach(r => {
+          const p = pantryMatch(r.name);
+          if (!p || seen.has(p.id)) return;
+          seen.add(p.id);
+          if (p.status !== "have") { onRestock({ ...p, status: "have" }); restocked++; }
+        });
+      }
+
+      if (onSaved) onSaved(obs.length, restocked);
       onClose();
     } catch (err) {
       setError("Save failed: " + err.message);
@@ -3781,6 +4004,18 @@ function PriceImport({ stores, onClose, onSaved }) {
               that isn't a grocery item.
             </div>
 
+            <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:10,fontSize:12,cursor:"pointer"}}>
+              <input type="checkbox" checked={restock} onChange={e=>setRestock(e.target.checked)}
+                     style={{marginTop:2}} />
+              <span>
+                Mark these as restocked in the pantry
+                {(() => {
+                  const n = rows.filter(r=>r.keep && r.name.trim() && pantryMatch(r.name)).length;
+                  return <span className="text-muted"> — {n} line{n===1?"":"s"} matched a pantry item</span>;
+                })()}
+              </span>
+            </label>
+
             <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
               <button className="btn btn-outline" onClick={onClose}>Cancel</button>
               <button className="btn btn-primary" onClick={save}>Save prices</button>
@@ -3788,6 +4023,154 @@ function PriceImport({ stores, onClose, onSaved }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// --- Trip plan ------------------------------------------------------------
+// Groups what's on sale by store and says which stops are worth making.
+//
+// A note on the algorithm: the full version enumerates every subset of stores
+// and minimises (item cost + trip cost × stops). That matters when the same
+// item has a confirmed price at several stores, because moving one item can
+// flip which stores you visit. Today each item has exactly one confirmed
+// store, which makes the stores independent — a stop is worth it iff its own
+// deals clear the trip cost — so the subset search would return the same
+// answer at more expense. Revisit when per-store prices exist.
+
+const TRIP_PREFS_KEY = "saleWatchTripPrefs";
+
+function loadTripPrefs() {
+  try {
+    const raw = localStorage.getItem(TRIP_PREFS_KEY);
+    if (raw) return { homeStore: "", tripCost: 8, ...JSON.parse(raw) };
+  } catch (e) { /* private mode */ }
+  return { homeStore: "", tripCost: 8 };
+}
+
+function TripPlan({ items, deals }) {
+  const [prefs, setPrefs] = useState(loadTripPrefs);
+  const [open, setOpen] = useState(true);
+  const [stores, setStores] = useState([]);
+
+  useEffect(() => {
+    try { localStorage.setItem(TRIP_PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* */ }
+  }, [prefs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${SUPABASE_URL}/rest/v1/flyer_coverage?select=store,roles,drive_minutes&order=sort_order`,
+          { headers: sbHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { if (!cancelled) setStores(d||[]); })
+      .catch(()=>{});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Bucket the current shopping list by whichever store has the deal.
+  const byStore = {};
+  let unmatched = 0;
+  (items||[]).forEach(it => {
+    const d = (deals||{})[dealKey(it.name)];
+    if (!d || !d.store) { unmatched++; return; }
+    if (!byStore[d.store]) byStore[d.store] = { items: [], value: 0 };
+    byStore[d.store].items.push({ name: it.name, deal: d });
+    byStore[d.store].value += (d.price_cents||0)/100;
+  });
+
+  const storeNames = Object.keys(byStore);
+  if (!storeNames.length) return null;
+
+  const home = prefs.homeStore || storeNames[0];
+  const driveOf = s => {
+    const row = stores.find(x => x.store === s);
+    return row && row.drive_minutes != null ? row.drive_minutes : null;
+  };
+
+  // The home store is a given — you're going anyway, so it never pays a trip
+  // cost. Every other stop has to clear it on its own.
+  const rows = storeNames.map(s => {
+    const b = byStore[s];
+    const isHome = s === home;
+    return {
+      store: s, ...b, isHome,
+      drive: driveOf(s),
+      worth: isHome || b.value >= prefs.tripCost
+    };
+  }).sort((a,b) => (b.isHome - a.isHome) || (b.value - a.value));
+
+  const skipped = rows.filter(r => !r.worth);
+  const stops = rows.filter(r => r.worth);
+
+  return (
+    <div style={{marginTop:20,padding:"12px 14px",border:"1px solid var(--parchment-dark)",
+                 borderRadius:8,background:"rgba(0,0,0,0.015)"}}>
+      <div onClick={()=>setOpen(o=>!o)}
+           style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+        <div style={{fontWeight:700,fontSize:14}}>
+          🚗 Trip plan · {stops.length} stop{stops.length===1?"":"s"}
+        </div>
+        <span style={{fontSize:10,color:"var(--ink-light)"}}>{open ? "▲" : "▼"}</span>
+      </div>
+
+      {open && (
+        <div style={{marginTop:10}}>
+          {rows.map(r => (
+            <div key={r.store}
+                 style={{display:"flex",justifyContent:"space-between",gap:10,padding:"6px 0",
+                         borderBottom:"1px dotted var(--parchment-dark)",
+                         opacity: r.worth ? 1 : 0.55}}>
+              <div>
+                <span style={{fontWeight:600}}>{r.store}</span>
+                {r.isHome && <span className="text-muted" style={{fontSize:11}}> · home</span>}
+                {!r.isHome && r.drive != null &&
+                  <span className="text-muted" style={{fontSize:11}}> · +{r.drive} min</span>}
+                <div style={{fontSize:11,color:"var(--ink-light)"}}>
+                  {r.items.map(i=>i.name).join(", ")}
+                </div>
+              </div>
+              <div style={{textAlign:"right",whiteSpace:"nowrap",fontSize:12}}>
+                <div style={{fontWeight:600}}>{r.items.length} item{r.items.length===1?"":"s"}</div>
+                {!r.isHome && (
+                  <div style={{color: r.worth ? "var(--saffron)" : "var(--ink-light)"}}>
+                    {r.worth ? "worth the stop" : `skip — get at ${home}`}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {skipped.length > 0 && (
+            <div style={{marginTop:8,fontSize:11,color:"var(--ink-light)"}}>
+              {skipped.length === 1 ? "That stop isn't" : "Those stops aren't"} worth the drive for
+              what's there — the items still show their price so you can decide.
+            </div>
+          )}
+
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginTop:12}}>
+            <label style={{fontSize:11}}>
+              <div className="text-muted">Home store</div>
+              <select className="filter-select" value={home}
+                      onChange={e=>setPrefs(p=>({...p, homeStore:e.target.value}))}>
+                {(stores.length ? stores.map(s=>s.store) : storeNames).map(s =>
+                  <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label style={{fontSize:11}}>
+              <div className="text-muted">An extra stop is worth</div>
+              <select className="filter-select" value={prefs.tripCost}
+                      onChange={e=>setPrefs(p=>({...p, tripCost:Number(e.target.value)}))}>
+                {[4,6,8,10,15,20].map(n=><option key={n} value={n}>${n}+</option>)}
+              </select>
+            </label>
+            {unmatched > 0 && (
+              <span className="text-muted" style={{fontSize:11,marginLeft:"auto"}}>
+                {unmatched} item{unmatched===1?"":"s"} not on sale anywhere — get {unmatched===1?"it":"them"} at {home}.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4088,7 +4471,7 @@ function PantryTab({ recipes, version }) {
   const [expandedCats, setExpandedCats] = useState({});
   const [showPhotoImport, setShowPhotoImport] = useState(false);
   const [showPriceImport, setShowPriceImport] = useState(false);
-  const [priceSaved, setPriceSaved] = useState(0);
+  const [priceSaved, setPriceSaved] = useState(null);
   const [reviewQueue, setReviewQueue] = useState([]);
   const [showReview, setShowReview] = useState(false);
   const [mealRangeStart, setMealRangeStart] = useState("");
@@ -4313,16 +4696,20 @@ function PantryTab({ recipes, version }) {
       )}
       {showPriceImport && (
         <PriceImport
+          pantryItems={items}
+          onRestock={i=>upsert(i)}
           onClose={()=>setShowPriceImport(false)}
-          onSaved={n=>setPriceSaved(n)}
+          onSaved={(n,r)=>setPriceSaved({prices:n, restocked:r||0})}
         />
       )}
-      {priceSaved > 0 && (
+      {priceSaved && priceSaved.prices > 0 && (
         <div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",
                      background:"var(--ink,#2b2b2b)",color:"#fff",padding:"10px 16px",
-                     borderRadius:8,fontSize:13,zIndex:9999}}
-             onClick={()=>setPriceSaved(0)}>
-          Saved {priceSaved} price{priceSaved===1?"":"s"} · tap to dismiss
+                     borderRadius:8,fontSize:13,zIndex:9999,cursor:"pointer"}}
+             onClick={()=>setPriceSaved(null)}>
+          Saved {priceSaved.prices} price{priceSaved.prices===1?"":"s"}
+          {priceSaved.restocked > 0 && ` · restocked ${priceSaved.restocked} pantry item${priceSaved.restocked===1?"":"s"}`}
+          {" · tap to dismiss"}
         </div>
       )}
       {showReview && (
@@ -4418,6 +4805,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
           ))}
         </div>
       ))}
+      <TripPlan items={items} deals={deals} />
       <FlyerCoverage />
     </div>
   );
