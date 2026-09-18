@@ -18,6 +18,12 @@
   <style>
     body { margin: 0; padding: 0; }
     #root { min-height: 100vh; }
+    /* A single over-wide element used to stretch the layout viewport, and the
+       phone answered by zooming out to fit — the app appeared to flip into
+       desktop mode at random. Clamp the document so one bad row can only clip
+       itself instead of rescaling every screen. */
+    html, body { max-width: 100%; overflow-x: hidden; }
+    #root { max-width: 100%; overflow-x: hidden; }
   </style>
 </head>
 <body>
@@ -3735,9 +3741,17 @@ function SaleWeekPlanner({ recipes, onPlanned }) {
                 <div style={{fontWeight:700,fontSize:16,marginTop:2}}>
                   {p.favorite && "⭐ "}{p.title}
                 </div>
-                <div style={{fontSize:12,color:"var(--saffron)",marginTop:4,fontWeight:600}}>
+                {/* Each chip stays on one line, but the ROW must wrap. These were
+                    adjacent inline spans with only marginRight between them — a
+                    margin is not a line-break opportunity, so the row became one
+                    unbreakable line, pushed past the screen edge, and mobile
+                    browsers widened the layout viewport to fit it. That is what
+                    looked like the app "randomly going into desktop mode".
+                    Flex with wrap gives the row real break points. */}
+                <div style={{fontSize:12,color:"var(--saffron)",marginTop:4,fontWeight:600,
+                             display:"flex",flexWrap:"wrap",gap:"4px 10px",minWidth:0}}>
                   {(p.deals||[]).map((d,j) => (
-                    <span key={j} style={{marginRight:10,whiteSpace:"nowrap"}}>
+                    <span key={j} style={{whiteSpace:"nowrap"}}>
                       {d.name} ${(d.price_cents/100).toFixed(2)}{d.unit_basis==="lb"?"/lb":""} @{d.store}
                     </span>
                   ))}
