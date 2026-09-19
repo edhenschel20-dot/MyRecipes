@@ -2,20 +2,45 @@
   "name": "The Recipe Book",
   "short_name": "Recipes",
   "description": "The Henschel family recipe book",
-  "start_url": "https://edhenschel20-dot.github.io/MyRecipes/",
-  "scope": "https://edhenschel20-dot.github.io/MyRecipes/",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f5f0e8",
   "theme_color": "#d4891a",
   "icons": [
-    { "src": "icon-192.png?v=2", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-192.png?v=2", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "icon-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png?v=2",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png?v=2",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png?v=2",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-512.png?v=2",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "share_target": {
-    "action": "https://edhenschel20-dot.github.io/MyRecipes/",
+    "action": "/",
     "method": "GET",
-    "params": { "title": "share_title", "text": "share_text", "url": "share_url" }
-  }
+    "params": {
+      "title": "share_title",
+      "text": "share_text",
+      "url": "share_url"
+    }
+  },
+  "id": "/"
 }
