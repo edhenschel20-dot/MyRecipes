@@ -406,8 +406,13 @@ const SUPABASE_URL = "https://ejfclvtttwzmxxjnqwcm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqZmNsdnR0dHd6bXh4am5xd2NtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDIyNTQsImV4cCI6MjA5Njk3ODI1NH0.YOPnHz8HdMkwxMfaADLrK4i8aDZG68wy-EEjWjRRCm8";
 const SYNC_PREFS_KEY = "recipebook_supabase_v1";
 
+// Supabase is the source of truth for the whole household, so sync is always
+// on. It used to be opt-in per device, which left phones that never tapped
+// "Save & Enable" silently local-only (no startup pull, no auto-push).
 function loadSyncPrefs() {
-  try { return JSON.parse(localStorage.getItem(SYNC_PREFS_KEY)||"{}"); } catch { return {}; }
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem(SYNC_PREFS_KEY)||"{}") || {}; } catch {}
+  return { ...p, enabled: true };
 }
 function saveSyncPrefs(p) { try { localStorage.setItem(SYNC_PREFS_KEY, JSON.stringify(p)); } catch {} }
 
