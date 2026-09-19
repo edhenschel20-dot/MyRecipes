@@ -356,6 +356,8 @@ function parseIngredient(raw) {
   if (typeof raw !== "string") raw = String(raw);
   const frac = {"½":0.5,"⅓":1/3,"⅔":2/3,"¼":0.25,"¾":0.75,"⅛":0.125};
   let str = raw.trim();
+  // "4½" / "4 ½" -> 4.5 (plain replace turned "4½" into "40.5")
+  str = str.replace(/^(\d+)\s*([½⅓⅔¼¾⅛])/, (m, w, f) => String(+w + frac[f]));
   Object.entries(frac).forEach(([k,v]) => { str = str.replace(k, String(v)); });
   const numRe = /^(\d+\s+\d+\/\d+|\d+\/\d+|\d*\.?\d+)\s*/;
   const numMatch = str.match(numRe);
@@ -6582,9 +6584,10 @@ function buildShoppingList(pantryItems, calendar, recipes, rangeStart, rangeEnd,
     const qtyStr = formatNeedQty(need, usePackages);
     const recipeList = formatNeedBreakdown(need);
     if (match) {
-      if (match.status === "have") continue; // assume current stock covers it, whether matched via substitution or fuzzy match
       usedPantryIds.add(match.id);
-      mealItems.push({ ...match, mealQty: qtyStr || null, mealRecipes: recipeList, substitutionKey: subKey, forIngredient: need.name, isSubstituted });
+      // Pantry "have" items stay on the list, flagged, so a stale pantry can't
+      // silently drop something the recipe needs (e.g. ground beef).
+      mealItems.push({ ...match, mealQty: qtyStr || null, mealRecipes: recipeList, substitutionKey: subKey, forIngredient: need.name, isSubstituted, pantryHave: match.status === "have" });
     } else {
       mealItems.push({
         id: "meal-"+normalizeWords(need.name).join("-"),
@@ -6722,7 +6725,7 @@ function PantryTab({ recipes, version }) {
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button className={`btn btn-sm ${view==="pantry"?"btn-primary":"btn-outline"}`} onClick={()=>setView("pantry")}>Pantry</button>
           <button className={`btn btn-sm ${view==="shopping"?"btn-primary":"btn-outline"}`} onClick={()=>setView("shopping")}>
-            🛒 Shopping {shoppingList.length>0&&<span style={{marginLeft:4,background:"white",color:"var(--saffron)",borderRadius:10,padding:"0 5px",fontSize:10,fontWeight:700}}>{shoppingList.length}</span>}
+            🛒 Shopping {shoppingList.filter(i=>!i.pantryHave).length>0&&<span style={{marginLeft:4,background:"white",color:"var(--saffron)",borderRadius:10,padding:"0 5px",fontSize:10,fontWeight:700}}>{shoppingList.filter(i=>!i.pantryHave).length}</span>}
           </button>
           <button className={`btn btn-sm ${view==="household"?"btn-primary":"btn-outline"}`} onClick={()=>setView("household")}>🏠 Household</button>
           <button className="btn btn-primary btn-sm" onClick={()=>{setEditItem(null);setShowAdd(true);}}>+ Add Item</button>
@@ -6767,7 +6770,7 @@ function PantryTab({ recipes, version }) {
               </label>
             )}
           </div>
-          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} deals={dealBadges} verdicts={dealVerdicts} />
+          <ShoppingList items={shoppingList} onCycleStatus={cycleStatus} onMarkOut={id=>setItems(prev=>prev.map(x=>x.id===id?{...x,status:"out"}:x))} onEdit={i=>{setEditItem(i);setShowAdd(true);}} statBadge={statBadge} showingMeals={!!(mealRangeStart&&mealRangeEnd)} allPantryItems={items} onSubstitute={setSubstitution} deals={dealBadges} verdicts={dealVerdicts} />
         </>
       ) : (
         <>
@@ -6888,13 +6891,32 @@ function substituteCandidates(forIngredient, allPantryItems) {
   return [...related, ...rest];
 }
 
-function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute, deals, verdicts }) {
+function ShoppingList({ items: allItems, onCycleStatus, onMarkOut, onEdit, statBadge, showingMeals, allPantryItems, onSubstitute, deals, verdicts }) {
   const [openSubFor, setOpenSubFor] = useState(null);
+  const items = allItems.filter(i=>!i.pantryHave);
+  const atHome = allItems.filter(i=>i.pantryHave);
   const grouped = {};
   items.forEach(i=>{ const c=i.category||"Other"; if(!grouped[c]) grouped[c]=[]; grouped[c].push(i); });
 
+  const atHomeBlock = atHome.length>0 && (
+    <div style={{marginBottom:16,padding:"10px 12px",border:"1px dashed var(--parchment-dark)",borderRadius:4}}>
+      <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"var(--ink-light)",marginBottom:4}}>🏠 Pantry says you have — check</div>
+      <div style={{fontSize:12,color:"var(--ink-light)",marginBottom:6}}>Needed for your meals. Tap <strong>Not home</strong> to move it to the list and fix the pantry.</div>
+      {atHome.map(item=>(
+        <div key={item.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:"1px dashed var(--parchment-dark)"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:600,fontSize:14}}>🏠 {item.name}</div>
+            {item.mealQty && <div style={{fontSize:12,color:"var(--ink-light)"}}>Need {item.mealQty}{item.mealRecipes?` for ${item.mealRecipes}`:""}</div>}
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={()=>onMarkOut ? onMarkOut(item.id) : onCycleStatus(item.id)}>Not home</button>
+        </div>
+      ))}
+    </div>
+  );
+
   if(items.length===0) return (
     <div>
+      {atHomeBlock}
       <div className="empty-state">
         <div className="empty-icon">🛒</div>
         <div className="empty-title">Shopping list is clear!</div>
@@ -6910,6 +6932,7 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
         Tap a badge to update status when you restock.
         {showingMeals && " Items marked 📅 are pulled in from meals on your calendar — tap 🔁 to swap in what you actually buy instead."}
       </p>
+      {atHomeBlock}
       {Object.entries(grouped).map(([cat,catItems])=>(
         <div key={cat} style={{marginBottom:16}}>
           <div style={{fontFamily:"'Special Elite',monospace",fontSize:12,textTransform:"uppercase",letterSpacing:2,color:"var(--ink-light)",marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--parchment-dark)"}}>{cat}</div>
