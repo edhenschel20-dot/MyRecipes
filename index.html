@@ -916,7 +916,7 @@ function RecipeBook() {
       try {
         const share = JSON.parse(raw);
         setPendingShareData(share);
-        setTab('import');
+        setShowAddMenu(true);
       } catch(e) {}
     }
   }, []);
@@ -933,6 +933,7 @@ function RecipeBook() {
   }, [selectedRecipe]);
   const [showSync, setShowSync] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [cookMode, setCookMode] = useState(null);
   const [dinnerSelection, setDinnerSelection] = useState([]);
@@ -1224,11 +1225,11 @@ function RecipeBook() {
               {githubPrefs.enabled?"☁️":"☁️"} Sync
             </button>
             <button className="btn-header" onClick={()=>setShowSync(true)}>⇅ Share</button>
-            <button className="btn btn-primary" onClick={()=>setShowAdd(true)}>+ Add Recipe</button>
+            <button className="btn btn-primary" onClick={()=>setShowAddMenu(true)}>+ Add Recipe</button>
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["tonight","🍳 Cook Tonight"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["import","📥 Import"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["tonight","🍳 Cook Tonight"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
@@ -1241,13 +1242,6 @@ function RecipeBook() {
           upsertRecipe(r); setTab("library");
         }} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; startDinnerCook(dinnerSelection.map(id=>({id}))); }} />}
-        {tab==="import" && <ImportTab pendingShare={pendingShareData} onImport={r=>{
-          const dup = findDuplicate(r.title, r.id);
-          if (dup) {
-            if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
-          }
-          upsertRecipe(r); setEditRecipe(r); setTab("library");
-        }} />}
         {tab==="saleweek" && <OnSaleThisWeek />}
         {tab==="saleweek" && <SaleWeekPlanner recipes={recipes} onAddedOne={()=>setCalVersion(v=>v+1)} onPlanned={n=>{
           setCalVersion(v=>v+1);
@@ -1260,6 +1254,22 @@ function RecipeBook() {
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} onStartMealCook={startMealCook} />}
         {tab==="foodlog" && <FoodLogTab recipes={recipes} />}
       </div>
+      {showAddMenu && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setShowAddMenu(false)}>
+          <div className="modal" style={{maxWidth:640,width:'100%'}}>
+            <ImportTab pendingShare={pendingShareData}
+              onClose={()=>{setShowAddMenu(false);setPendingShareData(null);}}
+              onManual={()=>{setShowAddMenu(false);setPendingShareData(null);setShowAdd(true);}}
+              onImport={r=>{
+                const dup = findDuplicate(r.title, r.id);
+                if (dup) {
+                  if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
+                }
+                upsertRecipe(r); setShowAddMenu(false); setPendingShareData(null); setEditRecipe(r); setTab("library");
+              }} />
+          </div>
+        </div>
+      )}
       {(showAdd||editRecipe) && <RecipeModal recipe={editRecipe} onSave={r=>{
           // Only check duplicates for new recipes, not edits
           if (!editRecipe) {
@@ -3359,8 +3369,8 @@ async function fetchAndAttachPhoto(recipe) {
 
 
 // ── Import Tab ─────────────────────────────────────────────────────────────
-function ImportTab({onImport, pendingShare}) {
-  const [mode,setMode] = useState("stashcook");
+function ImportTab({onImport, pendingShare, onClose, onManual}) {
+  const [mode,setMode] = useState("url");
   const [pasteText,setPasteText] = useState("");
   const [urlInput,setUrlInput] = useState("");
   const [loading,setLoading] = useState(false);
@@ -3388,9 +3398,7 @@ function ImportTab({onImport, pendingShare}) {
     if (r.source) {
       setLoading(true);
       try {
-        const proxied = "https://corsproxy.io/?" + encodeURIComponent(r.source);
-        const res = await fetch(proxied, { signal: AbortSignal.timeout(8000) });
-        const html = await res.text();
+        const html = (await fetchHtmlForUrl(r.source)) || "";
         const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
                 || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
         if (m) {
@@ -3464,25 +3472,25 @@ function ImportTab({onImport, pendingShare}) {
   function saveResult() { if(!result) return; onImport(result); setImported(p=>[...p,result.title]); setResult(null); setPasteText(""); setUrlInput(""); }
   return (
     <div>
-      <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:8}}>Import Recipes</div>
-      <p className="text-muted" style={{marginBottom:24}}>Bring in recipes from Stashcook, a URL, or any copied text. Add photos after saving.</p>
-      <div style={{display:'flex',gap:8,marginBottom:24,flexWrap:'wrap'}}>
-        {[["stashcook","📲 Stashcook Share"],["url","🔗 From URL"],["text","📋 Paste Any Recipe"],["json","{ } Paste JSON"]].map(([id,label])=>(
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700}}>Add Recipe</div>
+        {onClose && <button className="btn-icon" onClick={onClose} aria-label="Close" style={{fontSize:20}}>✕</button>}
+      </div>
+      <div style={{display:'flex',gap:8,marginBottom:18,flexWrap:'wrap'}}>
+        {[["url","🔗 URL"],["text","📋 Paste"],["stashcook","📲 Stashcook"],["json","{ } JSON"]].map(([id,label])=>(
           <button key={id} className={`btn ${mode===id?"btn-primary":"btn-outline"} btn-sm`} onClick={()=>{setMode(id);setResult(null);setError("");}}>{label}</button>
         ))}
+        {onManual && <button className="btn btn-ghost btn-sm" onClick={onManual}>✍️ Type it out</button>}
       </div>
       <div className="ai-panel">
         {mode==="stashcook" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>In Stashcook: open recipe → <strong>Share</strong> → <strong>Share as text</strong>. Paste below.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontFamily:'monospace',fontSize:13}} placeholder="Classic Steakhouse Mustard Sauce..." value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={handleStashcookParse} disabled={!pasteText.trim()||loading}>{loading?"Fetching photo…":"Parse & Import"}</button></div>)}
         {mode==="url" && (
           <div>
-            <p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>
-              Paste any recipe URL — food blogs, AllRecipes, Food Network, Serious Eats, and more. Reads the page's structured recipe data when it's there, and falls back to AI extraction otherwise, so it also works on the smaller sites AllRecipes-style parsers usually miss.
-            </p>
-            <div className="ai-input-row" style={{marginBottom:8}}>
-              <input className="ai-input" placeholder="https://www.allrecipes.com/recipe/..." value={urlInput} onChange={e=>{setUrlInput(e.target.value);setError("");setResult(null);}} />
+            <div className="ai-input-row" style={{marginBottom:8,display:'flex',gap:8,flexWrap:'wrap'}}>
+              <input className="ai-input" style={{flex:'1 1 200px',minWidth:0}} autoFocus type="url" inputMode="url" placeholder="https://www.allrecipes.com/recipe/..." value={urlInput} onChange={e=>{setUrlInput(e.target.value);setError("");setResult(null);}} onKeyDown={e=>{if(e.key==="Enter"&&urlInput.trim()&&!loading)handleUrlImport(urlInput);}} />
               <button className="btn btn-primary" onClick={()=>handleUrlImport(urlInput)} disabled={!urlInput.trim()||loading}>{loading?"Fetching…":"Import"}</button>
             </div>
-            <p className="text-muted">Paywalled sites (NYT Cooking, etc.) may not work. Try Paste Any Recipe as a fallback.</p>
+            <p className="text-muted" style={{fontSize:12}}>Any recipe page works. Paywalled sites (NYT Cooking) may not — use Paste instead.</p>
           </div>
         )}
         {mode==="text" && (<div><p style={{fontSize:14,marginBottom:12,lineHeight:1.6}}>Paste any recipe — plain text, JSON from Claude, or any format. JSON is parsed instantly; other text is sent to AI.</p><textarea className="ai-input form-textarea" style={{width:'100%',minHeight:180,marginBottom:12,fontSize:13}} placeholder="Paste recipe in any format…" value={pasteText} onChange={e=>{setPasteText(e.target.value);setError("");setResult(null);}} /><button className="btn btn-primary" onClick={()=>handleAIParse(pasteText)} disabled={!pasteText.trim()||loading}>{loading?"Parsing…":pasteText.trim().startsWith("{")?"Parse & Preview":"Parse with AI"}</button></div>)}
