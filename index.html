@@ -1254,7 +1254,7 @@ function RecipeBook() {
           window.alert(`Added ${n} dinner${n===1?"":"s"} to the calendar. The Shopping tab will pick them up.`);
           setTab("calendar");
         }} />}
-        {tab==="tonight" && <CookTonight recipes={recipes} onOpen={setSelectedRecipe}
+        {tab==="tonight" && <CookTonight recipes={recipes} onOpen={r=>{setSelectedRecipe(r); setTab("library");}}
            onCook={startCookMode} onPlanned={()=>setCalVersion(v=>v+1)} />}
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} onStartMealCook={startMealCook} />}
@@ -4230,31 +4230,352 @@ const VERDICT_MARK = {
   "on sale \u2014 you buy this": { icon: "\ud83d\uded2", color: "var(--saffron)" },
 };
 
+// --- Cook Tonight: what is a MEAL? -------------------------------------------
+// Plain JS, no JSX, so it runs in node for the accuracy test and pastes into
+// index.html unchanged.
+//
+// The readiness view answers "is everything for this recipe in the pantry?"
+// It cannot answer "is this recipe dinner?". 325 of the recipes came in from
+// ChefTap with guessed categories, and the guesses put a bacon salt, a steak
+// crust and two cocktails under Dinner. So the role of a recipe is decided
+// here from three signals, in order of trust: the title (what a cook calls
+// it), the categories (right most of the time), and the parsed ingredients
+// (sweet things are dessert, liquor is a drink, a protein makes a main).
+//
+// Roles:
+//   main       an entree - the thing dinner is built around
+//   side       goes next to an entree (potatoes, vegetables, mac, salad, bread)
+//   component  goes ON something - sauce, rub, crust, salsa, compound butter,
+//              seasoning salt, batter. Never a meal by itself.
+//   app        appetizer / snack (pinwheels, poppers, dips, mozzarella sticks)
+//   dessert, breakfast, drink
+//   stub       a one-line food-log entry with no steps ("Sirloin steak")
+
+const ROLE_PROTEIN = /\b(chicken|steak|steaks|beef|pork|shrimp|salmon|fish|cod|tilapia|sausage|smokies|turkey|brisket|ribs?|rib-?eyes?|tri-?tip|sirloin|tenderloin|filet|meatballs?|meatloaf|hot ?dogs?|burgers?|hamburgers?|sliders?|roast|chops?|carnitas|corned beef|kielbasa|brats?|bratwurst|ham|jerky|kabobs?|skewers|fajitas?|tacos?|taquitos|quesadillas?|burrito|cheesesteak|french dip|carne asada|pot roast|kiev|wings?)\b/i;
+// Bacon is left out on purpose: in this book bacon is a seasoning (green beans
+// and bacon, bacon fried corn), not the centre of the plate.
+
+const ROLE_PASTA = /\b(pasta|spaghetti|penne|rigatoni|ziti|mostaccioli|bucatini|capellini|fettuccine|linguine|lasagna|ravioli|tortell?[io]ni|tortelloni|gnocchi|shells|carbonara|cacio e pepe|alfredo|amatriciana|pomodoro|vodka sauce|manicotti|orzo)\b/i;
+const ROLE_DISH  = /\b(sandwich(es)?|wrap|pizzas?|flatbread|soup|chili(?! (garlic|sauce|aioli|powder|flakes?|oil|lime|crisp))|minestrone|stew|casserole|bowl|sheet pan|one pan|one pot|foil packs?|egg roll in a bowl|pot pie)\b/i;
+
+const ROLE_SIDE  = /\b(potato(es)?|fries|wedges|tots|asparagus|green beans?|carrots?|corn|broccoli|cauliflower|zucchini|squash|brussels?|mac (and|&|n) cheese|macaroni|stuffing|salad|rice|noodles|knots|rolls|bread|slaw|jalapenos|tomatoes|fritters|mashed|smashed|beans|vegetables?|veggies)\b/i;
+
+const ROLE_COMPONENT = /\b(sauce|salsa|pico de gallo|dry rub|rub|seasoning|glaze|marinade|dressing|vinaigrette|au jus|gravy|compound butter|honey butter|butter compote|crust for|crust recipe|dipping oil|batter|aioli|chimichurri|relish|(bacon|bourbon|sea|seasoning|smoked) salt)\b/i;
+// "<dish> with <sauce>" is a dish. "Parmesan Crust FOR Steaks" is a component.
+const ROLE_DISH_BEFORE_WITH = /^(.*?)\b(with|w\/|and|&|paired with)\b/i;
+
+const ROLE_APP = /\b(pinwheels?|poppers?|dip|crostini|bruschettas?|sticks|puffs|jerky|smokies|fondue|nuts|almonds|pizza rolls|pizza pops|toasted ravioli|fried ravioli|fried mozzarella|mozzarella en carrozza|jell-?o|crack bread|rattlesnake bites|cheesy bread|bread bites|brie bites|mini peppers|candied bacon|mozzarella sticks|burrata)\b/i;
+// An app word next to the protein the meal is built on is still a meal:
+// "Sheet Pan Bruschetta Chicken", "French Onion Dip Chicken Bites".
+const ROLE_APP_UNLESS = /\b(chicken|steak|shrimp|salmon|pork chops?|ribs|french dip|sandwich|pizzas?(?! (rolls|pops|bites))|flatbread)\b/i;
+const ROLE_APP_STILL = /\b(pinwheels?|poppers?|smokies|jerky|sticks|toasted ravioli|fried ravioli)\b/i;
+const ROLE_APP_BITES = /\b(bites?)\b/i;
+
+const ROLE_DESSERT = /\b(cookies?|cake|fudge|brittle|caramels?|truffles?|pie|pudding|muffins?|donuts?|brownies?|churros?|fluff|candied nuts|sweet bread|banana bread|zucchini bread|pumpkin bread|ice cream|cheesecake|mint chip)\b/i;
+const ROLE_SWEET_ITEM = /\b(sugar|chocolate|cocoa|vanilla|marshmallow|caramel|sweetened condensed|whipped topping|cake mix|pudding|oreo|extract|corn syrup|honey|maple syrup|cinnamon)\b/i;
+const ROLE_SAVORY_ITEM = /\b(garlic|onion|cheese|chicken|beef|pork|steak|pepper|tomato|pasta|broth|soy|mustard|worcestershire|bacon)\b/i;
+
+const ROLE_DRINK = /\b(margarita|lemonade|iced tea|long island|cocktail|shots?|hot chocolate|mojito|mule|punch|sangria|smoothie)\b/i;
+const ROLE_LIQUOR = /\b(tequila|vodka|rum|bourbon|whiskey|cointreau|curacao|triple sec|grand marnier|liqueur|limoncello|creme de|kahlua|amaretto|gin|beer|wine)\b/i;
+
+const ROLE_BREAKFAST = /\b(french toast|breakfast|egg bites|pancakes?|waffles?|omelet|frittata|hash)\b/i;
+
+// Ingredient names for a recipe however it is shaped: readiness test rows
+// (items), a Supabase row (ingredients_parsed), the app's own recipe object
+// (ingredientsParsed, or just the raw lines before a parse has landed).
+function recipeItems(r) {
+  if (Array.isArray(r.items)) return r.items.filter(Boolean);
+  const parsed = r.ingredientsParsed || r.ingredients_parsed;
+  if (Array.isArray(parsed) && parsed.length) return parsed.map(e => e && e.item).filter(Boolean);
+  return (r.ingredients || []).map(x => typeof x === "string" ? x : (x && (x.item || x.name)) || "").filter(Boolean);
+}
+
+function recipeRole(r) {
+  const title = String(r.title || "");
+  const cats = (r.categories || []).map(c => String(c).toLowerCase());
+  const items = recipeItems(r).map(s => String(s).toLowerCase());
+  const nsteps = r.nsteps != null ? r.nsteps : (r.steps || []).length;
+  const has = (re, s) => re.test(s);
+
+  // Food-log placeholders: one line, no method. Never a suggestion.
+  if (nsteps === 0 && items.length <= 1) return "stub";
+
+  const titleProtein = has(ROLE_PROTEIN, title);
+  const titlePasta   = has(ROLE_PASTA, title);
+  const titleDish    = has(ROLE_DISH, title);
+  const lastWord     = (title.replace(/[^a-z ]/gi, " ").trim().split(/\s+/).pop() || "");
+  const lastWordSide = has(ROLE_SIDE, lastWord);
+
+  // Components first: the title names a sauce/rub/crust/salt and no dish sits
+  // in front of "with". "Steak with Garlic Parmesan Cream Sauce" is a steak;
+  // "Parmesan Crust for Steaks" is a crust. Checked before drinks so that
+  // "Bourbon Salt" and an au jus made with wine are not cocktails.
+  if (has(ROLE_COMPONENT, title)) {
+    const m = title.match(ROLE_DISH_BEFORE_WITH);
+    const before = m ? m[1] : "";
+    const dishInFront = before && (has(ROLE_PROTEIN, before) || has(ROLE_PASTA, before) ||
+                                   has(ROLE_SIDE, before) || has(ROLE_DISH, before));
+    if (!dishInFront) return "component";
+  }
+  if (["sauce","topping","dressing","marinade","rub"].some(c => cats.includes(c)) &&
+      !titleProtein && !titlePasta && !titleDish) return "component";
+
+  // Drinks: category, a drink word, or a title that says nothing but a list
+  // of liquor ("TGI Friday's Copycat Recipe version 2" is a Long Island).
+  // A burger filed under Drink is still a burger.
+  const liquor = items.filter(i => has(ROLE_LIQUOR, i)).length;
+  if (!titleProtein && !titlePasta &&
+      (cats.includes("drink") || has(ROLE_DRINK, title) || liquor >= 2)) return "drink";
+
+  if (cats.includes("breakfast") || (cats.includes("brunch") && cats.length === 1) ||
+      has(ROLE_BREAKFAST, title)) return "breakfast";
+
+  // Sweet things, whatever the category says ("Mint Chip Lasagna": Dinner).
+  const sweet = items.filter(i => has(ROLE_SWEET_ITEM, i)).length;
+  const savory = items.filter(i => has(ROLE_SAVORY_ITEM, i)).length;
+  if (has(ROLE_DESSERT, title) && !titleProtein) return "dessert";
+  if (cats.includes("dessert") && !titleProtein && !has(ROLE_SIDE, title)) return "dessert";
+  if (sweet >= 3 && sweet > savory && !titleProtein && !titlePasta && !has(ROLE_SIDE, title)) return "dessert";
+
+  // Appetizers by name. "Chicken Bites" / "Steak Bites" are dinner here;
+  // "Hot Dog Bites" and "Zucchini Pizza Bites" are not. A title that ends in
+  // a side noun ("Jalapeno Popper Mashed Potatoes") is a side.
+  if (has(ROLE_APP, title) && !titlePasta && !lastWordSide &&
+      (!has(ROLE_APP_UNLESS, title) || has(ROLE_APP_STILL, title))) return "app";
+  if (has(ROLE_APP_BITES, title)) {
+    return has(/\b(chicken|steak|beef|pork)\b/i, title) && !/\b(hot ?dog|popper)/i.test(title) ? "main" : "app";
+  }
+
+  // Sides: a side word in the title and no protein in the title. A protein
+  // among the first three ingredients still makes it a main (fried rice with
+  // chicken breast, "sides" that are really sheet-pan dinners). A salad with
+  // no protein is a side even when it is a pasta salad.
+  const leadProtein = items.slice(0, 3).some(i => has(ROLE_PROTEIN, i) && !/\b(broth|stock|bouillon)\b/.test(i));
+  if (/\bsalad\b/i.test(title) && !titleProtein) return leadProtein ? "main" : "side";
+  if ((has(ROLE_SIDE, title) || lastWordSide) && !titleProtein && !titlePasta && (!titleDish || lastWordSide)) {
+    return leadProtein ? "main" : "side";
+  }
+  if (["side dish","salad","bread"].some(c => cats.includes(c)) && !titleProtein && !titlePasta && !titleDish) {
+    return leadProtein ? "main" : "side";
+  }
+
+  // Appetizer category with nothing that says "meal" in the title.
+  if ((cats.includes("appetizer") || cats.includes("snack")) && !titleProtein && !titlePasta && !titleDish) return "app";
+
+  if (titleProtein || titlePasta || titleDish) return "main";
+  if (cats.includes("dinner") || cats.includes("lunch") || cats.includes("soup")) {
+    return leadProtein || items.length >= 5 ? "main" : "side";
+  }
+  if (cats.includes("appetizer") || cats.includes("snack")) return "app";
+  return leadProtein ? "main" : "side";
+}
+
+// What a component goes on, from its title. Used to say "goes on steak - no
+// steak in the pantry" instead of listing a crust as something to cook.
+// pantryRe is tested against the names of pantry rows in the Proteins
+// category only (or all rows for bread/pasta/chips): "Steak Cut French Fries"
+// must not count as having a steak.
+const HOST_WORDS = [
+  [/\bsteaks?\b|\bribeye|\bsirloin|\bfilet/i, "steak",   /\b(steak|ribeye|rib-eye|sirloin|filet|strip|t-bone|tenderloin)\b/i],
+  [/\bchicken\b/i,                            "chicken", /\bchicken\b/i],
+  [/\bpork\b|\bribs?\b/i,                     "pork",    /\b(pork|ribs?)\b/i],
+  [/\bbrisket\b|\bbeef\b/i,                   "beef",    /\b(brisket|beef|roast)\b/i],
+  [/\bfish\b/i,                               "fish",    /\b(fish|cod|tilapia|salmon)\b/i],
+  [/\bburgers?\b/i,                           "burgers", /\b(ground beef|burger)\b/i],
+  [/\bfajita/i,                               "fajitas", /\b(chicken|steak|skirt)\b/i],
+  [/\bpasta\b|\bgnocchi\b/i,                  "pasta",   /\b(pasta|spaghetti|penne|gnocchi)\b/i, true],
+  [/\bbread\b|\bdipping\b/i,                  "bread",   /\bbread|baguette|loaf\b/i, true],
+  [/\btacos?\b|\bchips\b|\bsalsa\b|\bpico\b/i,"tacos or chips", /\b(tortilla|chips|taco)\b/i, true],
+  [/\bhibachi\b/i,                            "hibachi", /\b(steak|chicken|shrimp)\b/i],
+  [/\bau jus\b|\bfrench dip\b/i,              "roast beef", /\b(roast beef|beef)\b/i],
+];
+function componentHost(title) {
+  for (const [re, host, pantryRe, anyCategory] of HOST_WORDS) if (re.test(title)) return { host, pantryRe, anyCategory: !!anyCategory };
+  return null;
+}
+// Is the host of a component in the pantry right now? pantry = rows with
+// name/category/status. null when the component has no recognisable host.
+function hostInPantry(title, pantry) {
+  const h = componentHost(title);
+  if (!h) return { host: null, present: null };
+  const rows = (pantry || []).filter(p => p && p.status !== "out" &&
+    (h.anyCategory || String(p.category || "") === "Proteins"));
+  return { host: h.host, present: rows.some(p => h.pantryRe.test(String(p.name || ""))) };
+}
+
+// The ingredient a main is built around. Missing this is not "one item
+// short", it is "no dinner": "Longhorn Parmesan Chicken" without chicken is
+// a bowl of breading.
+const STAR_RE = /\b(chicken|steak|beef|pork|shrimp|salmon|fish|cod|tilapia|sausage|turkey|brisket|ribs?|rib-?eye|tri-?tip|sirloin|tenderloin|filet|roast|chops?|hot ?dogs?|ground (beef|turkey|chuck)|meatballs?|kielbasa|brats?|bratwurst|pasta|spaghetti|penne|rigatoni|ziti|mostaccioli|bucatini|capellini|fettuccine|linguine|lasagna noodles?|ravioli|tortell?[io]ni|gnocchi|pasta shells?|jumbo shells?|manicotti|egg noodles?|macaroni|elbow|noodles?|tortillas?|naan|pizza dough|flatbread|buns?|bread|baguette|hoagie|rolls)\b/i;
+const NOT_STAR = /\b(broth|stock|bouillon|seasoning|rub|sauce|powder|salt|base|bacon bits?|flavor|drippings|fat|breadcrumbs?|bread crumbs?|panko|crumbs?)\b/i;
+function isStarItem(item) {
+  const s = String(item || "").toLowerCase();
+  return STAR_RE.test(s) && !NOT_STAR.test(s);
+}
+
+// A main whose title names a protein that appears nowhere in its
+// ingredients has the wrong ingredient list (an import pasted the lines of a
+// different recipe). Returns the protein word, or null when the list fits.
+const TITLE_PROTEIN_CHECK = {
+  chicken: /\bchicken\b/i, steak: /\b(steak|sirloin|rib-?eye|filet|tri-?tip|flank|skirt|strip|tenderloin)\b/i,
+  beef: /\b(beef|chuck|roast|brisket|steak|sirloin)\b/i, pork: /\bpork\b/i, shrimp: /\b(shrimp|prawn)/i,
+  salmon: /\bsalmon\b/i, sausage: /\b(sausage|smokies|kielbasa|bratwurst)/i, turkey: /\bturkey\b/i,
+  brisket: /\bbrisket\b/i, fish: /\b(fish|cod|tilapia|halibut)\b/i,
+};
+function titleMismatch(r) {
+  const m = String(r.title || "").match(/\b(chicken|steak|beef|pork|shrimp|salmon|sausage|turkey|brisket|fish)\b/i);
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  const items = recipeItems(r);
+  if (!items.length) return null;
+  return items.some(i => TITLE_PROTEIN_CHECK[word].test(String(i))) ? null : word;
+}
+
+// Things every kitchen has that the matcher has not got round to judging
+// yet (it works alphabetically, 200 a night, and "salt and pepper" is used
+// by 42 recipes). Treated as in stock when they are the only unknowns.
+const STAPLE_RE = /^(salt|pepper|black pepper|ground black pepper|kosher salt|sea salt|table salt|salt and (black )?pepper|kosher salt and (black )?pepper|salt & pepper|freshly ground (black )?pepper|(extra[- ]virgin )?olive oil|(vegetable|canola|neutral|cooking|frying|avocado) oil|oil|water|ice|ice cube|butter|flour|all[- ]purpose flour|sugar|garlic powder|onion powder|paprika|cooking spray|nonstick spray)$/i;
+function isStaple(item) { return STAPLE_RE.test(String(item || "").trim()); }
+
+// One readiness row + its recipe -> what the page actually needs to know.
+//   role           see recipeRole
+//   ready          every blocking item judged in stock (staples assumed)
+//   missing        blocking items not in the pantry (non-staple)
+//   missingStar    the entree's centre is among the missing
+//   unknown        judged by nobody yet, staples excluded
+//   lowItems       in the pantry but marked low
+function assessRecipe(row, recipe) {
+  const role = recipeRole(recipe);
+  const missing = (row.missing_items || []).filter(i => !isStaple(i));
+  const unknown = (row.unknown_items || []).filter(i => !isStaple(i));
+  const assumed = (row.missing_items || []).length + (row.unknown_items || []).length - missing.length - unknown.length;
+  const starMissing = missing.filter(isStarItem);
+  const starLow = (row.low_items || []).filter(isStarItem);
+  const stars = recipeItems(recipe).filter(isStarItem);
+  const ready = row.needed > 0 && missing.length === 0 && unknown.length === 0;
+  const suspect = role === "main" ? titleMismatch(recipe) : null;
+  return {
+    suspect,
+    id: row.recipe_id, title: row.title, role, recipe, row,
+    ready, missing, unknown, assumed, lowItems: row.low_items || [],
+    starMissing, starLow, stars,
+    missingStar: starMissing.length > 0,
+    haveCount: row.have_count, needed: row.needed,
+    pct: row.pct_in_stock,
+  };
+}
+
+// Group assessed recipes into what the page shows. Kept out of the component
+// so it can be tested against real rows in node.
+//
+//   readyMeals   mains, everything in stock            -> "Ready now"
+//   oneAway      mains missing exactly one NON-star item -> "One item away"
+//   needProtein  mains missing only their centre (1-2 items, all star)
+//   readySides   sides in stock (paired under a ready meal, and listed)
+//   readyExtras  components in stock, with their host and whether it is around
+//   shop         other mains, by how much is on hand   -> "Needs a shop"
+//   notDinner    app/dessert/breakfast/drink in stock   -> one collapsed line
+function buildTonight(assessed, pantry) {
+  const byPct = (a, b) => (b.pct - a.pct) || a.title.localeCompare(b.title);
+  const byMissing = (a, b) => (a.missing.length - b.missing.length) || (a.unknown.length - b.unknown.length) || byPct(a, b);
+  const mains = assessed.filter(a => a.role === "main" && !a.suspect);
+  const broken = assessed.filter(a => a.suspect);
+  const sides = assessed.filter(a => a.role === "side");
+  const comps = assessed.filter(a => a.role === "component");
+  const other = assessed.filter(a => ["app","dessert","breakfast","drink"].includes(a.role));
+
+  // A one-line recipe ("Smoked Sausage": 1 ingredient) is not "one item
+  // away" from anything; it needs the one thing it is. Those sit in shop.
+  const substantial = a => a.needed >= 2;
+  const readyMeals = mains.filter(a => a.ready).sort((a, b) => (b.recipe.favorite ? 1 : 0) - (a.recipe.favorite ? 1 : 0) || byPct(a, b));
+  const oneAway = mains.filter(a => !a.ready && substantial(a) && a.missing.length === 1 && !a.missingStar && a.unknown.length === 0).sort(byPct);
+  const needProtein = mains.filter(a => !a.ready && substantial(a) && a.missingStar && a.missing.length <= 2 && a.missing.every(isStarItem) && a.unknown.length === 0).sort(byPct);
+  // "Probably close" is for an unchecked garnish, not an unchecked salmon
+  // filet: when the unjudged line is the centre of the dish, the pantry
+  // almost certainly does not have it, and the row belongs in shop.
+  const nearly = mains.filter(a => !a.ready && substantial(a) && a.haveCount >= 2 && a.missing.length <= 1 && !a.missingStar &&
+                                   a.unknown.length > 0 && a.unknown.length <= 2 && !a.unknown.some(isStarItem)).sort(byMissing);
+  const placed = new Set([...readyMeals, ...oneAway, ...needProtein, ...nearly].map(a => a.id));
+  const shop = mains.filter(a => !placed.has(a.id)).sort(byMissing);
+
+  const readySides = sides.filter(a => a.ready).sort(byPct);
+  const readyExtras = comps.filter(a => a.ready).map(a => {
+    const h = hostInPantry(a.title, pantry);
+    return { ...a, host: h.host, hostInPantry: h.present };
+  });
+  const notDinner = other.filter(a => a.ready);
+
+  // A ready meal gets the ready sides that fit next to it: not another
+  // starch when the meal is pasta, and at most three.
+  const sideFor = (meal) => {
+    const pastaMeal = ROLE_PASTA.test(meal.title);
+    return readySides.filter(s => !(pastaMeal && (ROLE_PASTA.test(s.title) || /noodle|rice|mac/i.test(s.title)))).slice(0, 3);
+  };
+  // An add-on goes under a ready meal when the meal is its host ("steak",
+  // whole word - not "Steakhouse") and the meal does not already bring its
+  // own version of it: a parmesan-crusted steak needs no parmesan crust.
+  const addOnsFor = (meal) => readyExtras.filter(x => {
+    if (!x.host) return false;
+    const hostWord = x.host.split(" ")[0].replace(/s$/, "");
+    if (!new RegExp("\\b" + hostWord + "s?\\b", "i").test(meal.title)) return false;
+    const own = x.title.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/)
+      .filter(w => w.length >= 5 && !/^(recipe|makes|enough|steaks?|chicken|homemade|classic)$/.test(w));
+    return !own.some(w => new RegExp("\\b" + w.replace(/(ed|s)$/, ""), "i").test(meal.title));
+  });
+
+  return { readyMeals, oneAway, needProtein, nearly, shop, readySides, readyExtras, notDinner, broken, sideFor, addOnsFor };
+}
+
+// This week's ad for a missing ingredient, from the same watch_deals rows
+// the Sale Week tab shows. Word-level match with plurals folded so "hot dog
+// bun" finds "hot dog buns" and "yellow onion" finds "yellow onions"; the
+// shorter name must appear whole inside the longer one, so "onion" does not
+// find "onion powder"... there are no powders in watch_deals, but "chicken"
+// finding "chicken breast" is the intended kind of hit.
+function saleWords(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(Boolean)
+    .map(w => w.replace(/(oes|ies)$/, m => m === "oes" ? "o" : "y").replace(/(?<![s])s$/, ""));
+}
+// A processed form is not the fresh thing: sun-dried tomatoes are not on
+// sale because Roma tomatoes are.
+const SALE_FORM = /\b(sun-?dried|dried|canned|paste|sauce|powder|puree|juice|frozen|pickled|roasted|smoked|breadcrumbs?|crumbs?|broth|stock|seasoning|rub|mix|extract|syrup)\b/i;
+function saleFor(item, deals) {
+  const a = saleWords(item); if (!a.length) return null;
+  const hits = (deals || []).filter(d => {
+    if (SALE_FORM.test(item) && !SALE_FORM.test(d.name)) return false;
+    const b = saleWords(d.name);
+    const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+    return short.every(w => long.includes(w));
+  });
+  if (!hits.length) return null;
+  hits.sort((x, y) => (x.rank - y.rank) || (x.net_price_cents - y.net_price_cents));
+  return hits[0];
+}
+
 // --- Cook tonight ---------------------------------------------------------
-// The question the app could never answer before: what can I make right now,
-// without going to the store?
+// The question this tab answers: what can we make for DINNER tonight with
+// what is in the house? A dinner is an entree, maybe with a side. A steak
+// crust with no steak is not dinner, and neither is a bowl of buttered
+// noodles, however fully stocked either one is.
 //
-// It leans on two pieces that landed earlier. `recipes.ingredients_parsed`
-// turns "2 lb chicken thick-cut breast, cut into 1.5 inch pieces" into a qty,
-// a unit and an item. `pantry_match` says which pantry rows each of those
-// items actually IS — judged by a model, because substring matching thinks
-// "onion" is Onion Powder, "butter" is a peanut butter protein bar, and
-// "ground beef" is Ground Sage.
+// Data: `recipe_readiness` (which ingredients of each recipe are in the
+// pantry, judged by the pantry-match function) plus this week's `watch_deals`
+// for the one thing a meal is missing. The role of each recipe (entree,
+// side, component, snack...) is decided client-side by recipeRole() above:
+// the imported categories cannot be trusted for that.
 //
-// Stock STATUS is not cached: `recipe_readiness` reads it live, so marking
-// something out in the Pantry tab changes this list on the next refresh.
-//
-// Three deliberate choices about what counts as missing:
-//   - "low" does not block. If it is marked low there is probably enough for
-//     tonight, so it shows as a caution instead of a blocker.
-//   - Non-shopping items never block: water, toothpicks, wood chunks for the
-//     smoker. Otherwise half the Pit Boss recipes would read as un-makeable.
-//   - An ingredient with no verdict yet counts as UNKNOWN, never as missing
-//     and never as in stock. A recipe is not called makeable on the strength
-//     of ingredients nobody has checked.
+// Reading readiness rows, three deliberate choices stay from before:
+//   - "low" does not block; it shows as a caution.
+//   - Non-shopping items never block (water, toothpicks, wood chunks).
+//   - An ingredient nobody has judged is UNKNOWN, never in stock. Staples
+//     (salt, pepper, oil, flour) are the one exception: the matcher works
+//     through ingredients alphabetically, 200 a night, and until it reaches
+//     "salt and pepper" (42 recipes) nothing that uses it could ever show
+//     as ready.
 
 function useCookTonight(refreshKey) {
   const [rows, setRows] = useState(null);
+  const [deals, setDeals] = useState([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -4271,17 +4592,27 @@ function useCookTonight(refreshKey) {
       } catch (err) {
         if (!cancelled) { setError(err.message || String(err)); setRows([]); }
       }
+      // Deals are a garnish: if they fail, the page still works.
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/watch_deals?select=name,store,item,net_price_cents,ad_lb_cents,valid_to,verdict,rank&rank=lt.9&order=rank.asc,net_price_cents.asc`,
+          { headers: sbHeaders() }
+        );
+        if (res.ok) { const d = await res.json(); if (!cancelled) setDeals(d || []); }
+      } catch (err) { console.warn("[cook-tonight] deals failed:", err); }
     })();
     return () => { cancelled = true; };
   }, [refreshKey]);
 
-  return { rows, error };
+  return { rows, deals, error };
 }
 
-function MissingChips({ items, color }) {
+// Small pieces of a row: missing / low / unchecked chips, and the sale tag.
+function IngredientChips({ items, color, prefix }) {
   if (!items || !items.length) return null;
   return (
     <div style={{display:"flex",flexWrap:"wrap",gap:"4px 8px",marginTop:4,minWidth:0}}>
+      {prefix && <span style={{fontSize:12,color:"var(--ink-light)"}}>{prefix}</span>}
       {items.map((it, i) => (
         <span key={i} style={{fontSize:12,color,whiteSpace:"nowrap"}}>{it}</span>
       ))}
@@ -4289,11 +4620,24 @@ function MissingChips({ items, color }) {
   );
 }
 
+function SaleTag({ deal }) {
+  if (!deal) return null;
+  const mark = VERDICT_MARK[deal.verdict];
+  const price = "$" + (deal.net_price_cents / 100).toFixed(2) + (deal.ad_lb_cents ? "/lb" : "");
+  return (
+    <span style={{fontSize:12,color:mark ? mark.color : "var(--ink-light)",whiteSpace:"nowrap"}}>
+      {mark ? mark.icon + " " : "🛒 "}{deal.store} {price}{formatDealDate(deal.valid_to) ? " thru " + formatDealDate(deal.valid_to) : ""}
+    </span>
+  );
+}
+
 function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [rechecking, setRechecking] = useState(false);
   const [note, setNote] = useState("");
-  const { rows, error } = useCookTonight(refreshKey);
+  const [showNearly, setShowNearly] = useState(false);
+  const [showShop, setShowShop] = useState(false);
+  const { rows, deals, error } = useCookTonight(refreshKey);
 
   const byId = useMemo(() => {
     const m = {};
@@ -4301,19 +4645,24 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
     return m;
   }, [recipes]);
 
-  // Re-runs the matcher, which is what is needed after the pantry gains items.
-  // The pantry trigger has already dropped any verdict the change invalidated,
-  // so this only judges what actually needs judging.
+  // Re-runs the matcher until it has judged everything, up to five rounds of
+  // 200. Before, one press judged one batch and the page said "checked 200"
+  // while 400 ingredients were still waiting.
   async function recheck() {
     setRechecking(true); setNote("");
+    let total = 0;
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/pantry-match`, {
-        method: "POST", headers: sbHeaders(), body: JSON.stringify({ limit: 200 })
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || res.status);
-      setNote(json.judged ? `Checked ${json.judged} ingredient${json.judged===1?"":"s"}.`
-                          : "Everything was already up to date.");
+      for (let round = 0; round < 5; round++) {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/pantry-match`, {
+          method: "POST", headers: sbHeaders(), body: JSON.stringify({ limit: 200 })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || res.status);
+        total += json.judged || 0;
+        setNote(total ? `Checked ${total} ingredient${total===1?"":"s"}…` : "");
+        if (!json.judged || !json.remaining) break;
+      }
+      setNote(total ? `Checked ${total} ingredient${total===1?"":"s"}.` : "Everything was already up to date.");
       setRefreshKey(k => k + 1);
     } catch (err) {
       setNote("Recheck failed: " + (err.message || err));
@@ -4327,51 +4676,56 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
     try {
       const r = byId[recipeId];
       await addDinnersToCalendar([{ date: iso, recipe_id: recipeId, servings: (r && r.servings) || 4 }]);
-      setNote("Added to tonight's dinner.");
+      setNote(`Added ${r ? r.title : "it"} to tonight's dinner.`);
       if (onPlanned) onPlanned();
     } catch (err) {
       setNote("Couldn't add to the calendar: " + (err.message || err));
     }
   }
 
-  if (rows === null) {
+  // Everything below is pure and lives in buildTonight() so it can be tested
+  // against real rows outside the browser.
+  const tonight = useMemo(() => {
+    if (!rows) return null;
+    const live = rows.filter(r => byId[r.recipe_id] && r.needed > 0);
+    const assessed = live.map(r => assessRecipe(r, byId[r.recipe_id]));
+    const t = buildTonight(assessed, loadPantry());
+    const unknown = live.reduce((s, r) => s + r.unknown_count, 0);
+    const needed = live.reduce((s, r) => s + r.needed, 0);
+    return { ...t, live, unknownShare: needed ? unknown / needed : 0, unknown };
+  }, [rows, byId]);
+
+  if (rows === null || !tonight) {
     return <div className="text-muted" style={{padding:"32px 0",textAlign:"center"}}>Checking the pantry…</div>;
   }
 
-  // Only real recipes — readiness rows for deleted ones would be dead links.
-  const live = rows.filter(r => byId[r.recipe_id] && r.needed > 0);
+  const { readyMeals, oneAway, needProtein, nearly, shop, readySides, readyExtras, notDinner, broken, live } = tonight;
 
-  const ready   = live.filter(r => r.can_make_now);
-  const close   = live.filter(r => !r.can_make_now && r.missing_count > 0 && r.missing_count <= 2)
-                      .sort((a,b) => a.missing_count - b.missing_count || b.pct_in_stock - a.pct_in_stock);
-  const distant = live.filter(r => !r.can_make_now && (r.missing_count > 2 || r.missing_count === 0))
-                      .sort((a,b) => b.pct_in_stock - a.pct_in_stock);
-
-  function Row({ r }) {
-    const recipe = byId[r.recipe_id];
+  // One row = one recipe. `kind` decides which buttons and which chips.
+  function Row({ a, kind, children }) {
+    const recipe = a.recipe;
+    // Plan a dinner, or a side to go with one; a crust or a rub is not a
+    // calendar entry. Nothing in "needs a shop" is planned from here either:
+    // that is what Sale Week is for.
+    const canPlan = kind !== "shop" && kind !== "extra";
     return (
       <div style={{padding:"11px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
           <div style={{flex:"1 1 200px",minWidth:0}}>
             <div style={{fontWeight:700,fontSize:16,cursor:"pointer"}}
                  onClick={() => onOpen && onOpen(recipe)}>
-              {recipe.favorite && "⭐ "}{r.title}
+              {recipe.favorite && "⭐ "}{a.title}
             </div>
             <div style={{fontSize:12,color:"var(--ink-light)",marginTop:2}}>
-              {r.have_count} of {r.needed} on hand
-              {r.not_needed_count > 0 && ` · ${r.not_needed_count} not a shopping item`}
+              {a.haveCount} of {a.needed} on hand
+              {a.assumed > 0 && ` · ${a.assumed} staple${a.assumed===1?"":"s"} assumed`}
             </div>
-            <MissingChips items={r.missing_items} color="var(--rust)" />
-            <MissingChips items={r.low_items} color="var(--saffron)" />
-            {r.unknown_count > 0 && (
-              <div style={{fontSize:11,color:"var(--ink-light)",marginTop:3}}>
-                {r.unknown_count} ingredient{r.unknown_count===1?"":"s"} not checked yet
-              </div>
-            )}
+            {children}
+            <IngredientChips items={a.lowItems} color="var(--saffron)" prefix="running low:" />
           </div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {r.can_make_now && (
-              <button className="btn btn-outline btn-sm" onClick={() => planTonight(r.recipe_id)}>
+            {canPlan && (
+              <button className="btn btn-outline btn-sm" onClick={() => planTonight(a.id)}>
                 📅 Tonight
               </button>
             )}
@@ -4384,18 +4738,69 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
     );
   }
 
-  function Section({ title, subtitle, list }) {
-    if (!list.length) return null;
+  // A missing ingredient with this week's ad next to it, when there is one.
+  function Needs({ items, color }) {
+    return (
+      <div style={{display:"flex",flexWrap:"wrap",gap:"4px 10px",marginTop:4,alignItems:"baseline"}}>
+        <span style={{fontSize:12,color:"var(--ink-light)"}}>needs</span>
+        {items.map((it, i) => {
+          const deal = saleFor(it, deals);
+          return (
+            <span key={i} style={{fontSize:12,whiteSpace:"nowrap"}}>
+              <span style={{color:color || "var(--rust)",fontWeight:700}}>{it}</span>
+              {deal && <span> · <SaleTag deal={deal} /></span>}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Tappable chips for the sides and add-ons that go with a ready meal.
+  function Pairings({ meal }) {
+    const sides = tonight.sideFor(meal);
+    const addOns = tonight.addOnsFor(meal);
+    if (!sides.length && !addOns.length) return null;
+    const chip = (x, label) => (
+      <span key={x.id} onClick={(e) => { e.stopPropagation(); onOpen && onOpen(x.recipe); }}
+            style={{fontSize:12,padding:"2px 8px",borderRadius:12,border:"1px solid var(--parchment-dark)",
+                    background:"var(--parchment)",cursor:"pointer",whiteSpace:"nowrap"}}>
+        {label} {x.title}
+      </span>
+    );
+    return (
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:6}}>
+        {sides.map(s => chip(s, "+ side:"))}
+        {addOns.map(x => chip(x, "+ on top:"))}
+      </div>
+    );
+  }
+
+  function Section({ title, subtitle, list, children }) {
+    if (!list || !list.length) return null;
     return (
       <div style={{marginBottom:26}}>
         <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
           {title} <span style={{color:"var(--ink-light)",fontWeight:400}}>({list.length})</span>
         </div>
-        <p className="text-muted" style={{margin:"2px 0 6px"}}>{subtitle}</p>
-        {list.map(r => <Row key={r.recipe_id} r={r} />)}
+        {subtitle && <p className="text-muted" style={{margin:"2px 0 6px"}}>{subtitle}</p>}
+        {children}
       </div>
     );
   }
+
+  // The one-line summary under the heading. Says what is true, including
+  // "no full meal is stocked" when that is the case.
+  const closeCount = oneAway.length + needProtein.length;
+  const summary = readyMeals.length
+    ? `${readyMeals.length} dinner${readyMeals.length===1?"":"s"} you can make without leaving the house` +
+      (closeCount ? `, ${closeCount} more one stop away.` : ".")
+    : closeCount
+      ? `No full dinner is stocked right now. ${closeCount} ${closeCount===1?"is":"are"} one stop away.`
+      : "No full dinner is stocked right now — here's what's closest.";
+
+  const otherCount = readySides.length + readyExtras.length + notDinner.length;
+  const roleLabel = { app: "snack", dessert: "dessert", breakfast: "breakfast", drink: "drink" };
 
   return (
     <div>
@@ -4405,11 +4810,7 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
           <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,marginBottom:4}}>
             🍳 Cook tonight
           </div>
-          <p className="text-muted">
-            {ready.length > 0
-              ? `${ready.length} recipe${ready.length===1?"":"s"} you can make without leaving the house.`
-              : "Nothing is fully stocked right now — here's what's closest."}
-          </p>
+          <p className="text-muted">{summary}</p>
         </div>
         <button className="btn btn-outline btn-sm" onClick={recheck} disabled={rechecking}>
           {rechecking ? "Checking…" : "↻ Recheck pantry"}
@@ -4418,6 +4819,15 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
 
       {note && <div style={{fontSize:13,color:"var(--sage)",marginBottom:10}}>{note}</div>}
       {error && <div style={{fontSize:13,color:"var(--rust)",marginBottom:10}}>Couldn't load: {error}</div>}
+
+      {tonight.unknownShare > 0.1 && (
+        <div style={{fontSize:13,color:"var(--ink-mid)",background:"var(--parchment-dark)",
+                     borderRadius:4,padding:"8px 12px",marginBottom:16}}>
+          {tonight.unknown} ingredient lines haven't been checked against the pantry yet
+          ({Math.round(tonight.unknownShare*100)}%), so some dinners are hiding in "needs a shop".
+          Recheck runs the next batches.
+        </div>
+      )}
 
       {!live.length && (
         <div className="empty-state">
@@ -4428,12 +4838,119 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
         </div>
       )}
 
-      <Section title="Ready now" list={ready}
-               subtitle="Everything these need is in the pantry." />
-      <Section title="One or two short" list={close}
-               subtitle="Close enough that one stop finishes them." />
-      <Section title="Needs a shop" list={distant}
-               subtitle="Sorted by how much of it you already have." />
+      <Section title="Ready now" list={readyMeals}
+               subtitle="Dinners with everything in the pantry.">
+        {readyMeals.map(a => (
+          <Row key={a.id} a={a} kind="ready">
+            <Pairings meal={a} />
+          </Row>
+        ))}
+      </Section>
+
+      <Section title="One item away" list={oneAway}
+               subtitle="Dinners a single stop finishes. On sale this week where it is.">
+        {oneAway.map(a => (
+          <Row key={a.id} a={a} kind="close">
+            <Needs items={a.missing} />
+          </Row>
+        ))}
+      </Section>
+
+      <Section title="Just needs the main ingredient" list={needProtein}
+               subtitle="Everything but the meat (or the pasta) is here.">
+        {needProtein.map(a => (
+          <Row key={a.id} a={a} kind="close">
+            <Needs items={a.missing} />
+          </Row>
+        ))}
+      </Section>
+
+      {nearly.length > 0 && (
+        <div style={{marginBottom:26}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
+            Probably close <span style={{color:"var(--ink-light)",fontWeight:400}}>({nearly.length})</span>
+          </div>
+          <p className="text-muted" style={{margin:"2px 0 6px"}}>
+            Nothing missing, but one or two lines nobody has checked yet.
+          </p>
+          {(showNearly ? nearly : nearly.slice(0, 4)).map(a => (
+            <Row key={a.id} a={a} kind="close">
+              {a.missing.length > 0 && <Needs items={a.missing} />}
+              <IngredientChips items={a.unknown} color="var(--ink-light)" prefix="unchecked:" />
+            </Row>
+          ))}
+          {nearly.length > 4 && (
+            <button className="btn btn-outline btn-sm" style={{marginTop:8}} onClick={() => setShowNearly(v => !v)}>
+              {showNearly ? "Show fewer" : `Show all ${nearly.length}`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {otherCount > 0 && (
+        <div style={{marginBottom:26}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
+            Sides & extras <span style={{color:"var(--ink-light)",fontWeight:400}}>({otherCount})</span>
+          </div>
+          <p className="text-muted" style={{margin:"2px 0 6px"}}>
+            Stocked, but not dinner on their own.
+          </p>
+          {readySides.map(a => (
+            <Row key={a.id} a={a} kind="side">
+              <div style={{fontSize:12,color:"var(--ink-light)"}}>side dish</div>
+            </Row>
+          ))}
+          {readyExtras.map(a => (
+            <Row key={a.id} a={a} kind="extra">
+              <div style={{fontSize:12,color:a.hostInPantry === false ? "var(--rust)" : "var(--ink-light)"}}>
+                {a.host
+                  ? (a.hostInPantry ? `goes on ${a.host} — you have it` : `goes on ${a.host} — no ${a.host} in the pantry`)
+                  : "seasoning / component"}
+              </div>
+            </Row>
+          ))}
+          {notDinner.length > 0 && (
+            <div style={{marginTop:8}}>
+              <span className="text-muted">
+                Also stocked: {notDinner.map(a => `${a.title} (${roleLabel[a.role] || a.role})`).join(", ")}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {shop.length > 0 && (
+        <div style={{marginBottom:26}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
+            Needs a shop <span style={{color:"var(--ink-light)",fontWeight:400}}>({shop.length})</span>
+          </div>
+          <p className="text-muted" style={{margin:"2px 0 6px"}}>
+            Dinners sorted by how little is missing.
+          </p>
+          {!showShop && (
+            <button className="btn btn-outline btn-sm" onClick={() => setShowShop(true)}>
+              Show the closest 20
+            </button>
+          )}
+          {showShop && shop.slice(0, 20).map(a => (
+            <Row key={a.id} a={a} kind="shop">
+              {a.missing.length > 0 && <Needs items={a.missing} />}
+              <IngredientChips items={a.unknown} color="var(--ink-light)" prefix="unchecked:" />
+            </Row>
+          ))}
+        </div>
+      )}
+
+      {broken.length > 0 && (
+        <div style={{fontSize:12,color:"var(--ink-light)",marginTop:8}}>
+          Left out: {broken.map((a, i) => (
+            <span key={a.id}>
+              {i > 0 && ", "}
+              <span style={{textDecoration:"underline",cursor:"pointer"}} onClick={() => onOpen && onOpen(a.recipe)}>{a.title}</span>
+            </span>
+          ))} — the title says {broken.map(a => a.suspect).filter((v, i, arr) => arr.indexOf(v) === i).join("/")} but the ingredient list doesn't. Open to fix.
+        </div>
+      )}
     </div>
   );
 }
@@ -4450,6 +4967,47 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
 // priced ABOVE the usual are left out - that is not a sale worth a line.
 // Berries are watched in 'ad' mode: their packs don't compare cleanly by
 // size, so they are just flagged as on sale.
+
+// "Add to shopping list" from a sale line. The shopping list is built from
+// pantry items marked low/out, so this marks the matching pantry item "out"
+// (or creates one) and stamps an "On sale:" note that the list shows.
+// Returns "added" | "already".
+function guessPantryCategory(name) {
+  const n = String(name || "").toLowerCase();
+  if (/\b(chicken|beef|steak|pork|turkey|sausage|bacon|ham|shrimp|salmon|fish|tilapia|cod|brisket|ribs?|roast|hot ?dogs?|franks|wieners|ground|chops?|tenderloin|meatballs|kielbasa|bratwurst|brats)\b/.test(n)) return "Proteins";
+  if (/\b(milk|cheese|butter|yogurt|eggs?|cream|sour cream|half and half|mozzarella|cheddar|parmesan)\b/.test(n)) return "Dairy";
+  if (/\b(apples?|bananas?|berries|blueberries|strawberries|raspberries|grapes|oranges?|lemons?|limes?|avocados?|tomato(es)?|potato(es)?|onions?|peppers?|lettuce|spinach|broccoli|carrots?|celery|cucumbers?|corn|asparagus|mushrooms?|zucchini|cabbage|garlic|herbs?|cilantro|parsley|melon|watermelon|peaches|pears|salad)\b/.test(n)) return "Produce";
+  if (/\b(pasta|spaghetti|penne|rice|bread|buns|rolls|tortillas?|cereal|oats|noodles|flour)\b/.test(n)) return "Grains & Pasta";
+  if (/\b(soda|pop|juice|water|coffee|tea|beer|wine|seltzer|drinks?)\b/.test(n)) return "Drinks";
+  if (/\b(chips|crackers|cookies|snacks?|pretzels|popcorn|candy)\b/.test(n)) return "Snacks";
+  if (/\b(sauce|ketchup|mustard|mayo|mayonnaise|dressing|salsa|bbq|syrup)\b/.test(n)) return "Sauces & Condiments";
+  return "Other";
+}
+function addSaleToShoppingList(names, saleNote) {
+  const pantry = loadPantry();
+  const list = (names || []).filter(Boolean);
+  let item = null;
+  for (const nm of list) { item = pantry.find(p => fuzzyIngredientMatch(nm, p.name)); if (item) break; }
+  const stamp = (notes) => {
+    const kept = String(notes || "").replace(/\s*On sale:[^\n]*/g, "").trim();
+    return (kept ? kept + "\n" : "") + saleNote;
+  };
+  let result = "added";
+  if (item) {
+    if (item.status === "out" || item.status === "low") result = "already";
+    item = { ...item, status: item.status === "low" ? "low" : "out", notes: stamp(item.notes) };
+    const next = pantry.map(p => p.id === item.id ? item : p);
+    savePantry(next);
+  } else {
+    const nm = list[0] || "item";
+    item = { id: pantryUid(), name: nm.replace(/^\w/, c => c.toUpperCase()), category: guessPantryCategory(nm),
+             status: "out", quantity: "", size: "", count: "", notes: saleNote };
+    savePantry([...pantry, item]);
+  }
+  const prefs = loadSyncPrefs();
+  if (prefs.enabled) syncToSupabase([], [item], null).catch(e => console.warn("[on-sale] pantry sync failed:", e));
+  return result;
+}
 
 function OnSaleThisWeek() {
   const [rows, setRows] = useState(null);
@@ -4500,6 +5058,17 @@ function OnSaleThisWeek() {
 
   function Line({ r }) {
     const mark = VERDICT_MARK[r.verdict];
+    const [listed, setListed] = useState(() => {
+      const pantry = loadPantry();
+      const hit = (r.names || []).map(nm => pantry.find(x => fuzzyIngredientMatch(nm, x.name))).find(Boolean);
+      return hit && (hit.status === "out" || hit.status === "low") ? "already" : null;
+    });
+    function addToList(e) {
+      e.stopPropagation();
+      const until = r.valid_to ? new Date(r.valid_to + "T00:00:00").toLocaleDateString(undefined, { month: "numeric", day: "numeric" }) : "";
+      const note = `On sale: ${r.store} ${money(r.net_price_cents)}${r.ad_lb_cents ? "/lb" : ""}${until ? " thru " + until : ""} (${r.item})`;
+      setListed(addSaleToShoppingList(r.names, note));
+    }
     return (
       <div style={{padding:"7px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
@@ -4509,11 +5078,19 @@ function OnSaleThisWeek() {
             </span>
             <span className="text-muted" style={{fontSize:12}}> · {r.store}</span>
           </div>
-          <div style={{fontWeight:700,whiteSpace:"nowrap"}}>
-            {money(r.net_price_cents)}
-            {r.coupon_cents > 0 && (
-              <span style={{fontWeight:400,fontSize:12,color:"var(--sage)"}}> after coupon</span>
-            )}
+          <div style={{display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
+            <div style={{fontWeight:700}}>
+              {money(r.net_price_cents)}
+              {r.coupon_cents > 0 && (
+                <span style={{fontWeight:400,fontSize:12,color:"var(--sage)"}}> after coupon</span>
+              )}
+            </div>
+            <button className="btn btn-sm btn-outline" disabled={!!listed}
+                    title="Add to your shopping list (Pantry → Shopping)"
+                    style={{padding:"2px 8px",fontSize:12,minWidth:0,opacity:listed?0.8:1}}
+                    onClick={addToList}>
+              {listed ? "✓ On list" : "🛒 Add"}
+            </button>
           </div>
         </div>
         <div className="text-muted" style={{fontSize:12,marginTop:2,overflowWrap:"anywhere"}}>
@@ -5991,6 +6568,9 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
                   ? <div style={{fontSize:12,color:"var(--ink-light)"}}>Need {item.mealQty}{item.mealRecipes?` for ${item.mealRecipes}`:""}</div>
                   : (pantryDisplayAmount(item)&&<div style={{fontSize:12,color:"var(--ink-light)"}}>{pantryDisplayAmount(item)}</div>)
                 }
+                {/On sale:/.test(item.notes||"") && (
+                  <div style={{fontSize:12,color:"var(--sage)",fontWeight:600}}>🏷️ {(item.notes.match(/On sale:[^\n]*/)||[""])[0].replace(/^On sale:\s*/,"")}</div>
+                )}
                 <DealBadge deal={(deals||{})[dealKey(item.name)]} verdict={(verdicts||{})[dealKey(item.name)]} />
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
