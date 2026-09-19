@@ -1242,6 +1242,7 @@ function RecipeBook() {
           upsertRecipe(r); setTab("library");
         }} />}
         {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; startDinnerCook(dinnerSelection.map(id=>({id}))); }} />}
+        {tab==="saleweek" && <StockUpThisWeek />}
         {tab==="saleweek" && <OnSaleThisWeek />}
         {tab==="saleweek" && <SaleWeekPlanner recipes={recipes} onAddedOne={()=>setCalVersion(v=>v+1)} onPlanned={n=>{
           setCalVersion(v=>v+1);
@@ -3861,7 +3862,7 @@ function SyncModal({ data, onImport, onReplace, onClose }) {
 
 // ── Pantry Tab ────────────────────────────────────────────────────────────
 const PANTRY_KEY = "recipebook_pantry_v1";
-const PANTRY_CATS = ["Proteins","Produce","Dairy","Grains & Pasta","Canned & Jarred","Spices & Herbs","Sauces & Condiments","Baking","Drinks","Snacks","Other"];
+const PANTRY_CATS = ["Proteins","Produce","Dairy","Grains & Pasta","Canned & Jarred","Spices & Herbs","Sauces & Condiments","Baking","Drinks","Snacks","Household","Other"];
 const STATUS_COLORS = { have:"#5a7a4a", low:"#d4891a", out:"#b84a2e" };
 const STATUS_LABELS = { have:"Have it", low:"Running low", out:"Out / Need" };
 
@@ -4982,6 +4983,7 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
 // Returns "added" | "already".
 function guessPantryCategory(name) {
   const n = String(name || "").toLowerCase();
+  if (/\b(toilet paper|bath tissue|paper towels?|paper plates?|trash bags?|garbage bags?|laundry|detergent|dishwasher|dish soap|rinse aid|fabric softener|dryer sheets?|wipes|zip bags?|ziploc|storage bags?|facial tissue|kleenex|hand soap|batter(y|ies)|cutlery|plastic forks|toilet wand|aluminum foil|foil|drinking water|bottled water|dog treats?|dog food|cat food|litter|napkins?|sponges?|bleach|cleaner)\b/.test(n)) return "Household";
   if (/\b(chicken|beef|steak|pork|turkey|sausage|bacon|ham|shrimp|salmon|fish|tilapia|cod|brisket|ribs?|roast|hot ?dogs?|franks|wieners|ground|chops?|tenderloin|meatballs|kielbasa|bratwurst|brats)\b/.test(n)) return "Proteins";
   if (/\b(milk|cheese|butter|yogurt|eggs?|cream|sour cream|half and half|mozzarella|cheddar|parmesan)\b/.test(n)) return "Dairy";
   if (/\b(apples?|bananas?|berries|blueberries|strawberries|raspberries|grapes|oranges?|lemons?|limes?|avocados?|tomato(es)?|potato(es)?|onions?|peppers?|lettuce|spinach|broccoli|carrots?|celery|cucumbers?|corn|asparagus|mushrooms?|zucchini|cabbage|garlic|herbs?|cilantro|parsley|melon|watermelon|peaches|pears|salad)\b/.test(n)) return "Produce";
@@ -5156,6 +5158,310 @@ function OnSaleThisWeek() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// --- Household sundries + "Stock up this week" --------------------------------
+// Two views the SQL in proposed.sql adds:
+//   stock_up_this_week  - the short list: non-perishables genuinely cheap this
+//                         week, food (from watch_deals) and household (from
+//                         household_ad_this_week), with a one-line "why".
+//   household_item      - one row per household watch item: where to buy
+//                         (per-store medians from receipts), cadence, next due,
+//                         and this week's best ad with a verdict.
+// Both fetches fail soft: a 404 (view not applied yet) or a network error hides
+// the section, exactly as OnSaleThisWeek does. Nothing else in the app depends
+// on them.
+
+// One fetch per page load for the stock-up list even though it renders in two
+// places (top of Sale Week, top of the Shopping list).
+let _stockUpPromise = null;
+function fetchStockUp() {
+  if (!_stockUpPromise) {
+    _stockUpPromise = (async () => {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/stock_up_this_week?select=rank,kind,stock_up,name,store,item,price_cents,net_price_cents,coupon_cents,coupon_title,valid_to,ad_unit,ad_unit_cents,pct_below_usual,thin_history,everyday_store,why&order=rank.asc`,
+        { headers: sbHeaders() }
+      );
+      if (!res.ok) throw new Error(`stock_up_this_week ${res.status}`);
+      return await res.json();
+    })().catch(err => { console.warn("[stock-up] load failed:", err); return []; });
+  }
+  return _stockUpPromise;
+}
+
+function moneyCents(c) { return c == null ? "" : "$" + (c / 100).toFixed(2); }
+function shortStore(s) { return s === "Sam's Club" ? "Sam's" : s === "Pete's Fresh Market" ? "Pete's" : s === "Jewel-Osco" ? "Jewel" : (s || ""); }
+function thruDate(d) {
+  if (!d) return "";
+  const x = new Date(d + "T00:00:00");
+  return isNaN(x) ? "" : x.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+}
+// 12.3 -> "12.3¢/bag", 233 -> "$2.33/lb", sheets shown per 100
+function unitPriceText(cents, label) {
+  if (cents == null || !isFinite(Number(cents))) return "";
+  const c = Number(cents);
+  if (label === "sheet") return `${(c * 100).toFixed(1)}¢/100 sheets`;
+  return c < 100 ? `${c.toFixed(1)}¢/${label}` : `$${(c / 100).toFixed(2)}/${label}`;
+}
+
+// Same rule as addSaleToShoppingList, but returns the pantry item to upsert
+// instead of writing storage. Used when PantryTab is mounted: it owns the
+// pantry state and saves it on every change, so writing localStorage behind
+// its back would be overwritten by its next save.
+// Household names need a stricter match than fuzzyIngredientMatch, whose
+// closeness test calls "batteries" and "butter" the same word. Exact words,
+// singular/plural only, every word of the shorter name present in the longer.
+function householdPantryMatch(name, pantryName) {
+  const sing = w => w.replace(/ies$/, "y").replace(/(?<![s])s$/, "");
+  const a = normalizeWords(name).map(sing), b = normalizeWords(pantryName).map(sing);
+  if (!a.length || !b.length) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.every(w => long.includes(w));
+}
+function pantryListItem(pantryItems, names, note, matcher) {
+  const match = matcher || fuzzyIngredientMatch;
+  const list = (names || []).filter(Boolean);
+  let item = null;
+  for (const nm of list) { item = (pantryItems || []).find(p => match(nm, p.name)); if (item) break; }
+  const stamp = (notes) => {
+    const kept = String(notes || "").replace(/\s*(On sale|Buy at):[^\n]*/g, "").trim();
+    return (kept ? kept + "\n" : "") + note;
+  };
+  if (item) return { ...item, status: item.status === "low" ? "low" : "out", notes: stamp(item.notes) };
+  const nm = list[0] || "item";
+  return { id: pantryUid(), name: nm.replace(/^\w/, c => c.toUpperCase()), category: guessPantryCategory(nm),
+           status: "out", quantity: "", size: "", count: "", notes: note };
+}
+
+function StockUpThisWeek({ compact, pantryItems, onUpsert }) {
+  const [rows, setRows] = useState(null);
+  const [open, setOpen] = useState(!compact);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { let c = false; fetchStockUp().then(r => { if (!c) setRows(r || []); }); return () => { c = true; }; }, []);
+  if (!rows || !rows.length) return null;
+
+  const LIMIT = 6;
+  const shown = showAll ? rows : rows.slice(0, LIMIT);
+
+  function Line({ r }) {
+    const match = r.kind === "household" ? householdPantryMatch : fuzzyIngredientMatch;
+    const [listed, setListed] = useState(() => {
+      const pantry = pantryItems || loadPantry();
+      const hit = pantry.find(x => match(r.name, x.name));
+      return hit && (hit.status === "out" || hit.status === "low") ? "already" : null;
+    });
+    function add(e) {
+      e.stopPropagation();
+      const until = thruDate(r.valid_to);
+      const note = `On sale: ${r.store} ${moneyCents(r.net_price_cents)}${r.ad_unit === "lb" ? "/lb" : ""}${until ? " thru " + until : ""} (${r.item}) — stock up`;
+      if (onUpsert) { onUpsert(pantryListItem(pantryItems, [r.name], note, match)); setListed("added"); }
+      else if (r.kind === "household") { const it = pantryListItem(loadPantry(), [r.name], note, match); savePantry([...loadPantry().filter(p => p.id !== it.id), it]); setListed("added"); }
+      else setListed(addSaleToShoppingList([r.name], note));
+    }
+    const where = r.stock_up === "freezer" ? "🧊" : "📦";
+    return (
+      <div style={{padding:"7px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 160px",minWidth:0}}>
+            <span title={r.stock_up === "freezer" ? "keeps in the freezer" : "shelf-stable"}>{where} </span>
+            <span style={{fontWeight:700,textTransform:"capitalize"}}>{r.name}</span>
+            <span className="text-muted" style={{fontSize:12}}> · {shortStore(r.store)}</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}>
+            <div style={{fontWeight:700}}>
+              {moneyCents(r.net_price_cents)}{r.ad_unit === "lb" ? "/lb" : ""}
+              {r.coupon_cents > 0 && <span style={{fontWeight:400,fontSize:12,color:"var(--sage)"}}> w/ coupon</span>}
+            </div>
+            <button className="btn btn-sm btn-outline" disabled={!!listed}
+                    title="Add to your shopping list (Pantry → Shopping)"
+                    style={{padding:"2px 8px",fontSize:12,minWidth:0,opacity:listed?0.8:1}}
+                    onClick={add}>
+              {listed ? "✓ On list" : "🛒 Add"}
+            </button>
+          </div>
+        </div>
+        <div className="text-muted" style={{fontSize:12,marginTop:2,overflowWrap:"anywhere"}}>
+          {r.item}{r.valid_to ? " · thru " + thruDate(r.valid_to) : ""}
+        </div>
+        {r.why && (
+          <div style={{fontSize:12,marginTop:2,color: r.thin_history ? "var(--saffron)" : "var(--sage)",fontWeight:600,overflowWrap:"anywhere"}}>
+            {r.why}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{marginBottom: compact ? 16 : 24,padding:"12px 14px",background:"#eef4e9",border:"1px solid var(--sage)",borderRadius:6}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:"pointer"}}
+           onClick={() => setOpen(o => !o)}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize: compact ? 16 : 18,fontWeight:700}}>
+          📦 Stock up this week
+        </div>
+        <span className="text-muted" style={{fontSize:12,whiteSpace:"nowrap"}}>
+          {rows.length} worth buying extra {open ? "▲" : "▼"}
+        </span>
+      </div>
+      {open && (
+        <div>
+          <div className="text-muted" style={{fontSize:12,marginTop:4}}>
+            Things that keep, priced well under what you usually pay — and not beaten by another store's everyday price.
+          </div>
+          {shown.map((r, i) => <Line key={r.rank || i} r={r} />)}
+          {rows.length > LIMIT && !showAll && (
+            <button className="btn btn-outline btn-sm" style={{marginTop:10}}
+                    onClick={e => { e.stopPropagation(); setShowAll(true); }}>
+              Show {rows.length - LIMIT} more
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Where to buy each household item, from the family's own receipts.
+function HouseholdPanel({ pantryItems, onUpsert }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/household_item?select=watch_item_id,name,unit_label,base_unit,buys_total,buys_12mo,last_bought,median_gap_days,next_due,best_store,best_store_cents,best_store_n,stores,this_week`,
+          { headers: sbHeaders() }
+        );
+        if (!res.ok) throw new Error(`household_item ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setRows(data || []);
+      } catch (e) {
+        console.warn("[household] load failed:", e);
+        if (!cancelled) { setRows([]); setErr(String(e && e.message || e)); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (rows === null) return <p className="text-muted">Loading household items…</p>;
+  if (!rows.length) return (
+    <div className="empty-state">
+      <div className="empty-icon">🏠</div>
+      <div className="empty-title">No household items yet</div>
+      <p>{err ? "The household view isn't set up on the server yet." : "Once receipts show paper goods, cleaning and laundry, they appear here with the cheapest store."}</p>
+    </div>
+  );
+
+  const today = todayKey();
+  // overdue and bought this year first; things not bought in a year sink to the bottom
+  const dueScore = r => !r.buys_12mo ? 3 : r.next_due ? (r.next_due <= today ? 0 : 1) : 2;
+  const sorted = [...rows].sort((a, b) => dueScore(a) - dueScore(b) || String(a.next_due || "9").localeCompare(String(b.next_due || "9")) || b.buys_12mo - a.buys_12mo);
+
+  function inPantry(name) { return (pantryItems || []).find(p => householdPantryMatch(name, p.name)); }
+
+  function Card({ r }) {
+    const pantryHit = inPantry(r.name);
+    const listed = pantryHit && (pantryHit.status === "out" || pantryHit.status === "low");
+    const tw = r.this_week;
+    const stores = Array.isArray(r.stores) ? r.stores : [];
+    const others = stores.filter(s => s.store !== r.best_store);
+    const gapWeeks = r.median_gap_days ? Math.round(r.median_gap_days / 7) : null;
+    const overdue = r.buys_12mo > 0 && r.next_due && r.next_due <= today;
+    const stale = !r.buys_12mo;
+    const twNoCmp = tw && /^(no comparison|no baseline)/.test(tw.verdict || "");
+    const twNoCmpText = !tw ? "" : /no usable size/.test(tw.verdict) ? "can't compare, ad gives no size"
+      : /no baseline/.test(tw.verdict) ? "no history to compare"
+      : (tw.verdict || "").replace(/^no comparison — /, "can't compare, ");
+    const twGood = tw && tw.verdict === "stock up";
+    const twSame = tw && /^about the same/.test(tw.verdict || "");
+    const twRolls = tw && /rolls only/.test(tw.verdict || "");
+
+    function addToList(e) {
+      e.stopPropagation();
+      const where = r.best_store ? `Buy at: ${shortStore(r.best_store)} — usually ${unitPriceText(r.best_store_cents, r.unit_label)}` : "";
+      const note = twGood
+        ? `On sale: ${shortStore(tw.store)} ${moneyCents(tw.net_price_cents)}${tw.valid_to ? " thru " + thruDate(tw.valid_to) : ""} (${tw.item})`
+        : where;
+      onUpsert && onUpsert(pantryListItem(pantryItems, [r.name], note, householdPantryMatch));
+    }
+    function addToPantry(e) {
+      e.stopPropagation();
+      const item = { id: pantryUid(), name: r.name.replace(/^\w/, c => c.toUpperCase()), category: "Household",
+                     status: "have", quantity: "", size: "", count: "", notes: r.best_store ? `Buy at: ${shortStore(r.best_store)} — usually ${unitPriceText(r.best_store_cents, r.unit_label)}` : "" };
+      onUpsert && onUpsert(item);
+    }
+
+    return (
+      <div style={{padding:"10px 12px",marginBottom:8,background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 150px",minWidth:0}}>
+            <span style={{fontWeight:700,fontSize:15,textTransform:"capitalize"}}>{r.name}</span>
+            {overdue && <span style={{marginLeft:6,fontSize:11,fontWeight:700,color:"var(--rust)"}}>due now</span>}
+            {!overdue && !stale && r.next_due && <span className="text-muted" style={{marginLeft:6,fontSize:11}}>due ~{thruDate(r.next_due)}</span>}
+            {stale && <span className="text-muted" style={{marginLeft:6,fontSize:11}}>not bought this year</span>}
+          </div>
+          <div style={{display:"flex",gap:6,whiteSpace:"nowrap"}}>
+            <button className="btn btn-sm btn-outline" disabled={!!listed} style={{padding:"2px 8px",fontSize:12,minWidth:0}}
+                    title="Put it on the shopping list" onClick={addToList}>
+              {listed ? "✓ On list" : "🛒 Add"}
+            </button>
+            {!pantryHit && (
+              <button className="btn btn-sm btn-ghost" style={{padding:"2px 8px",fontSize:12,minWidth:0}}
+                      title="Track it in the pantry under Household" onClick={addToPantry}>+ Pantry</button>
+            )}
+          </div>
+        </div>
+
+        {r.best_store ? (
+          <div style={{fontSize:13,marginTop:4}}>
+            <span style={{fontWeight:700,color:"var(--sage)"}}>Buy at {shortStore(r.best_store)}</span>
+            <span> · {unitPriceText(r.best_store_cents, r.unit_label)}</span>
+            <span className="text-muted" style={{fontSize:12}}> ({r.best_store_n} buy{r.best_store_n === 1 ? "" : "s"}{stores[0] && stores[0].approx ? ", roll count approx." : ""})</span>
+            {others.length > 0 && (
+              <span className="text-muted" style={{fontSize:12}}>
+                {" · "}{others.map(s => `${shortStore(s.store)} ${unitPriceText(s.median_cents, r.unit_label)}`).join(" · ")}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="text-muted" style={{fontSize:12,marginTop:4}}>No priced purchases yet — sizes missing on the receipts.</div>
+        )}
+
+        <div className="text-muted" style={{fontSize:12,marginTop:2}}>
+          {r.buys_12mo} buy{r.buys_12mo === 1 ? "" : "s"} in 12 months
+          {gapWeeks ? ` · about every ${gapWeeks} wk` : ""}
+          {r.last_bought ? ` · last ${thruDate(r.last_bought)}` : ""}
+        </div>
+
+        {tw && (
+          <div style={{fontSize:12,marginTop:4,fontWeight:600,overflowWrap:"anywhere",
+                       color: twGood ? "var(--sage)" : twSame ? "var(--saffron)" : twRolls ? "var(--ink-light)" : "var(--ink-light)"}}>
+            {twGood ? "✅ " : twSame ? "➖ " : twRolls ? "🧻 " : twNoCmp ? "❔ " : "❌ "}
+            {shortStore(tw.store)} ad {moneyCents(tw.net_price_cents)}{tw.coupon_cents > 0 ? " after coupon" : ""}
+            {tw.ad_unit_cents != null ? ` · ${unitPriceText(tw.ad_unit_cents, r.unit_label)}` : tw.per_roll_eq_cents != null ? ` · ${moneyCents(tw.per_roll_eq_cents)}/roll-equiv.` : ""}
+            {" — "}
+            {twGood ? `${tw.pct_below_best_store}% under ${shortStore(r.best_store)}, stock up`
+              : twSame ? `about the same as ${shortStore(r.best_store)}`
+              : twRolls ? "rolls only, can't compare per sheet"
+              : /^skip/.test(tw.verdict || "") ? `${shortStore(r.best_store)} everyday is still cheaper`
+              : twNoCmpText}
+            <span style={{fontWeight:400,color:"var(--ink-light)"}}> ({tw.item})</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-muted" style={{marginBottom:12}}>
+        Where to buy the non-food stuff, from your own receipts. "Due" is a guess from how often you've bought it.
+        Ads only show here when they beat the store you already use.
+      </p>
+      {sorted.map(r => <Card key={r.watch_item_id} r={r} />)}
     </div>
   );
 }
@@ -6379,6 +6685,7 @@ function PantryTab({ recipes, version }) {
           <button className={`btn btn-sm ${view==="shopping"?"btn-primary":"btn-outline"}`} onClick={()=>setView("shopping")}>
             🛒 Shopping {shoppingList.length>0&&<span style={{marginLeft:4,background:"white",color:"var(--saffron)",borderRadius:10,padding:"0 5px",fontSize:10,fontWeight:700}}>{shoppingList.length}</span>}
           </button>
+          <button className={`btn btn-sm ${view==="household"?"btn-primary":"btn-outline"}`} onClick={()=>setView("household")}>🏠 Household</button>
           <button className="btn btn-primary btn-sm" onClick={()=>{setEditItem(null);setShowAdd(true);}}>+ Add Item</button>
           <button className="btn btn-outline btn-sm" onClick={()=>setShowPhotoImport(true)}>📷 Photo Import</button>
           <button className="btn btn-outline btn-sm" onClick={()=>setShowPriceImport(true)}>🧾 Import Prices</button>
@@ -6402,8 +6709,11 @@ function PantryTab({ recipes, version }) {
         </div>
       )}
 
-      {view==="shopping" ? (
+      {view==="household" ? (
+        <HouseholdPanel pantryItems={items} onUpsert={upsert} />
+      ) : view==="shopping" ? (
         <>
+          <StockUpThisWeek compact pantryItems={items} onUpsert={upsert} />
           <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:16,background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:6,padding:"10px 12px"}}>
             <span style={{fontSize:13,fontWeight:600,whiteSpace:"nowrap"}}>📅 Include meals planned</span>
             <input type="date" className="form-input" style={{maxWidth:150}} value={mealRangeStart} onChange={e=>setMealRangeStart(e.target.value)} />
@@ -6578,6 +6888,9 @@ function ShoppingList({ items, onCycleStatus, onEdit, statBadge, showingMeals, a
                 }
                 {/On sale:/.test(item.notes||"") && (
                   <div style={{fontSize:12,color:"var(--sage)",fontWeight:600}}>🏷️ {(item.notes.match(/On sale:[^\n]*/)||[""])[0].replace(/^On sale:\s*/,"")}</div>
+                )}
+                {/Buy at:/.test(item.notes||"") && !/On sale:/.test(item.notes||"") && (
+                  <div style={{fontSize:12,color:"var(--ink-light)",fontWeight:600}}>🏠 {(item.notes.match(/Buy at:[^\n]*/)||[""])[0].replace(/^Buy at:\s*/,"")}</div>
                 )}
                 <DealBadge deal={(deals||{})[dealKey(item.name)]} verdict={(verdicts||{})[dealKey(item.name)]} />
               </div>
