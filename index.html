@@ -3847,7 +3847,7 @@ function OnSaleThisWeek() {
     (async () => {
       try {
         const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/watch_deals?select=name,store,item,price_cents,net_price_cents,coupon_cents,coupon_title,valid_to,verdict,pct_below_usual,rank&rank=lt.9&order=rank.asc,name.asc,net_price_cents.asc`,
+          `${SUPABASE_URL}/rest/v1/watch_deals?select=name,store,item,price_cents,net_price_cents,coupon_cents,coupon_title,valid_to,verdict,pct_below_usual,rank,everyday_store,everyday_lb_cents,ad_lb_cents,pct_below_everyday&rank=lt.9&order=rank.asc,name.asc,net_price_cents.asc`,
           { headers: sbHeaders() }
         );
         if (!res.ok) throw new Error(await res.text());
@@ -3907,6 +3907,15 @@ function OnSaleThisWeek() {
           {r.pct_below_usual > 0 && (
             <span style={{color:"var(--sage)",fontWeight:600}}> · {r.pct_below_usual}% under what you usually pay</span>
           )}
+          {r.everyday_store && r.everyday_lb_cents > 0 && (() => { const ev = r.everyday_store === "Sam's Club" ? "Sam's" : r.everyday_store; return (
+            <div style={{marginTop:2,color: r.pct_below_everyday >= 5 ? "var(--sage)" : "var(--rust)",fontWeight:600}}>
+              {r.pct_below_everyday >= 5
+                ? `${money(r.ad_lb_cents)}/lb · ${r.pct_below_everyday}% under ${ev} everyday ${money(r.everyday_lb_cents)}/lb`
+                : r.pct_below_everyday > -5
+                  ? `About the same as ${ev} everyday ${money(r.everyday_lb_cents)}/lb`
+                  : `${ev} everyday is cheaper: ${money(r.everyday_lb_cents)}/lb`}
+            </div>
+          ); })()}
         </div>
       </div>
     );
@@ -4322,7 +4331,8 @@ function PriceImport({ stores, pantryItems, onRestock, onClose, onSaved }) {
         source: { type: "base64", media_type: f.type||"image/jpeg", data: await fileToBase64(f) }
       })));
 
-      const prompt = "These images are grocery receipts or screenshots of an order/purchase screen from a store app or website. "
+      const prompt = "These images are grocery receipts, screenshots of an order/purchase screen from a store app or website, "
+        + "or photos of the price label on a meat, deli or produce package (the sticker with net weight, price per lb and total price). "
         + "Extract every purchased line item. Return ONLY a JSON object, no markdown:\n"
         + '{"store":"Walmart","date":"2026-09-14","items":[{"name":"paper towels","description":"GV PPR TWL 6PK","price":8.97,"qty":1,"pack_qty":6,"pack_unit":"roll"}]}\n'
         + "Rules: store = the retailer name if visible, else empty string. date = purchase date as YYYY-MM-DD if visible, else empty string. "
@@ -4332,6 +4342,10 @@ function PriceImport({ stores, pantryItems, onRestock, onClose, onSaved }) {
         + "pack_qty = the count or weight in the package as a number (6 for a 6-pack, 12 for 12 oz, 1.89 for 1.89 lb) — "
         + "OMIT this field entirely if the package size is not visible; do not guess. "
         + "pack_unit = one of lb, oz, each, ct, bag, roll, sheet, load, fl oz, gal — omit if unknown. "
+        + "For a package PRICE LABEL: one item per label; price = the total price on the label, pack_qty = the net weight "
+        + "and pack_unit = lb (convert oz to lb), and per_lb = the price per lb printed on the label. name = the cut or product "
+        + "('ground beef', 'chicken breast', 'eye of round roast'), description = the product line as printed. "
+        + "If there is a 'sell by' or 'packed on' date, use it as the date. "
         + "Skip subtotals, tax, totals, coupons, bag fees and loyalty savings lines.";
 
       const res = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
@@ -4355,14 +4369,22 @@ function PriceImport({ stores, pantryItems, onRestock, onClose, onSaved }) {
       if (parsed.store) setStoreName(parsed.store);
       if (parsed.date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) setObservedOn(parsed.date);
 
-      setRows((parsed.items||[]).map(it => ({
-        keep: true,
-        name: it.name || "",
-        description: it.description || it.name || "",
-        price: it.price != null ? String(it.price) : "",
-        pack_qty: it.pack_qty != null ? String(it.pack_qty) : "",
-        pack_unit: it.pack_unit || ""
-      })));
+      setRows((parsed.items||[]).map(it => {
+        // A package label always carries two of weight / $ per lb / total;
+        // fill the third so the line has a usable per-pound price.
+        let packQty = it.pack_qty, packUnit = it.pack_unit || "";
+        if ((packQty == null || packQty === "") && it.per_lb > 0 && it.price > 0) {
+          packQty = Math.round((it.price / it.per_lb) * 100) / 100; packUnit = "lb";
+        }
+        return {
+          keep: true,
+          name: it.name || "",
+          description: it.description || it.name || "",
+          price: it.price != null ? String(it.price) : (it.per_lb > 0 && it.pack_qty > 0 ? String(Math.round(it.per_lb * it.pack_qty * 100) / 100) : ""),
+          pack_qty: packQty != null ? String(packQty) : "",
+          pack_unit: packUnit
+        };
+      }));
       setPhase("review");
     } catch (err) {
       setError("Scan failed: " + err.message);
@@ -4443,6 +4465,11 @@ function PriceImport({ stores, pantryItems, onRestock, onClose, onSaved }) {
               Photograph a receipt, or screenshot the order screen in the Walmart, Jewel,
               Target or Sam's app. Screenshots read better — they usually include the
               package size that paper receipts leave off.
+            </p>
+            <p className="text-muted" style={{marginBottom:14}}>
+              🥩 Meat or deli bought by the pound? Snap the price sticker on the package —
+              it has the weight and the price per pound that receipts leave out. Several
+              labels can go in at once.
             </p>
             <input ref={fileInputRef} type="file" accept="image/*" multiple
                    onChange={handleFiles}
