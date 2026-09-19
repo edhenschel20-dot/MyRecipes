@@ -182,29 +182,7 @@ const STYLES = `
   .lightbox-close { position: absolute; top: 20px; right: 24px; font-size: 32px; color: rgba(255,255,255,0.7); cursor: pointer; line-height: 1; background: none; border: none; }
 
   /* Cook mode */
-  .cook-mode-overlay { position: fixed; inset: 0; background: var(--ink); color: var(--cream); z-index: 100; display: flex; flex-direction: column; font-family: 'Lato', sans-serif; overflow-y: auto; }
-  .cook-header { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-  .cook-title { font-family: 'Special Elite', monospace; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.6; }
-  .cook-recipe-name { font-family: 'Playfair Display', serif; font-size: 22px; color: var(--saffron-light); }
-  .cook-progress { display: flex; gap: 6px; flex-wrap: wrap; }
-  .cook-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.2); transition: background 0.3s; }
-  .cook-dot.done { background: var(--saffron); }
-  .cook-dot.current { background: var(--saffron-light); transform: scale(1.4); }
-  .cook-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; text-align: center; }
-  .cook-photo { width: 180px; height: 180px; object-fit: cover; border-radius: 50%; margin-bottom: 24px; border: 4px solid rgba(240,184,75,0.4); }
-  .cook-step-num { font-family: 'Special Elite', monospace; font-size: 64px; color: rgba(255,255,255,0.08); line-height: 1; margin-bottom: 8px; }
-  .cook-recipe-label { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--saffron); margin-bottom: 16px; font-weight: 700; }
-  .cook-step-text { font-family: 'Playfair Display', serif; font-size: clamp(20px,3.5vw,32px); line-height: 1.5; max-width: 700px; }
-  .cook-ingredients { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 24px; max-width: 700px; }
-  .cook-ing-chip { background: rgba(240,184,75,0.15); border: 1px solid rgba(240,184,75,0.4); border-radius: 20px; padding: 6px 14px; font-size: 13px; color: var(--saffron-light); display: flex; flex-direction: column; align-items: center; gap: 1px; }
-  .cook-ing-amount { font-family: 'Special Elite', monospace; font-size: 15px; color: var(--saffron-light); font-weight: 700; }
-  .cook-ing-name { font-size: 12px; color: rgba(255,255,255,0.6); }
-  .cook-nav { display: flex; gap: 20px; align-items: center; padding: 24px; justify-content: center; }
-  .cook-nav-btn { padding: 14px 32px; font-family: 'Lato', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; border-radius: 3px; cursor: pointer; border: 2px solid; }
-  .cook-prev { background: none; border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.6); }
-  .cook-prev:hover { border-color: white; color: white; }
-  .cook-next { background: var(--saffron); border-color: var(--saffron); color: white; }
-  .cook-next:hover { background: var(--saffron-light); border-color: var(--saffron-light); }
+  /* .cook-* styles moved to COOK_STYLES (cook mode rewrite) */
 
   /* Dinner planner */
   .orch-timeline { position: relative; }
@@ -519,6 +497,7 @@ function rowToRecipe(row) {
     sugar: row.sugar,
     sodium: row.sodium,
     ingredients: row.ingredients || [],
+    ingredientsParsed: Array.isArray(row.ingredients_parsed) ? row.ingredients_parsed.map(p => ({ qty: p.qty, unit: p.unit, item: p.item, prep: p.prep })) : null,
     steps: row.steps || [],
     notes: row.notes || "",
     description: row.description || "",
@@ -1195,60 +1174,42 @@ function RecipeBook() {
       && (!hideQuickAdd || !(r.isQuickAdd || (r.tags||[]).includes("quick-add")));
   });
 
+  // (B) inside App(): REPLACES startCookMode, buildDinnerSteps and startMealCook.
   function startCookMode(recipe, scale) {
     try {
       const r = normalizeRecipe(recipe);
-      const s = scale && scale > 0 ? scale : 1;
-      const effServings = r.servings ? Math.round(r.servings * s * 100) / 100 : null;
-      const scaledIngredients = (r.ingredients||[]).map(ing=>scaleIngredientAmount(ing, s));
-      const steps = (r.steps||[]).map((step,i)=>{
-        const text = typeof step === "string" ? step : (step && step.content ? step.content : String(step||""));
-        let matched = [];
-        try { matched = matchIngredients(text, scaledIngredients); } catch(e) {}
-        return { text, num:i+1, recipe:r.title||"", photo:r.photo||null, matchedIngs:matched, servings:effServings };
-      });
-      if(steps.length === 0) { alert("This recipe has no steps yet."); return; }
-      setCookMode({ recipe:r, steps, currentIndex:0 });
-    } catch(e) {
-      alert("Could not start cook mode: " + e.message);
-    }
+      const plan = buildCookSteps(r, scale && scale > 0 ? scale : 1);
+      if (plan.steps.length === 0) { alert("This recipe has no steps yet."); return; }
+      setCookMode(plan);
+    } catch (e) { alert("Could not start cook mode: " + e.message); }
   }
-  function buildDinnerSteps(items) {
-    // items: [{id, servings}] — servings is the per-meal amount from the
-    // calendar entry, scaled against each recipe's own base servings so the
-    // ingredient amounts shown in cook mode match what was actually planned.
-    const sel = items.map(it=>{ const r = recipes.find(x=>x.id===it.id); return r ? {r, scale:(it.servings && r.servings) ? (it.servings/r.servings) : 1, effServings: it.servings || r.servings} : null; }).filter(Boolean);
-    const colorMap = {}; sel.forEach(({r},i)=>{colorMap[r.id]=COLORS[i%COLORS.length];});
-    const all = []; sel.forEach(({r,scale,effServings})=>{ const scaledIngs=(r.ingredients||[]).map(ing=>scaleIngredientAmount(ing,scale)); r.steps.forEach((text,idx)=>{ all.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,totalSteps:r.steps.length,globalOrder:idx/r.steps.length,photo:r.photo,matchedIngs:matchIngredients(text,scaledIngs),servings:effServings}); }); });
-    all.sort((a,b)=>a.globalOrder-b.globalOrder || sel.findIndex(({r})=>r.id===a.recipeId)-sel.findIndex(({r})=>r.id===b.recipeId));
-    return all;
+  function startDinnerCook(items) {
+    // items: [{id, servings?}] — servings from the calendar / planner, scaled
+    // against each recipe's own base servings.
+    try {
+      const plan = buildDinnerPlan(items, recipes, COLORS);
+      if (!plan.steps.length) { alert("No cookable steps in this meal yet."); return; }
+      setDinnerCookMode(plan);
+    } catch (e) { alert("Could not start dinner cook mode: " + e.message); }
   }
-
-  // Single entry point for "cook this meal" wherever it's triggered from
-  // (Calendar tab included): one recipe in the slot goes straight into the
-  // normal single-recipe cook mode; two or more route into the same
-  // interleaved, color-coded multi-recipe cook mode the Dinner Planner tab
-  // uses, so a full dinner planned on the calendar gets the same combined
-  // walkthrough without having to re-pick the recipes over there.
-  // entries: [{id, servings}] (servings optional — defaults to the recipe's
-  // own base servings, i.e. no scaling) so ingredient amounts always match
-  // whatever was set in the dinner planner / calendar for that meal.
   function startMealCook(entries) {
-    const items = (entries||[]).map(e => typeof e === "object" ? e : {id:e});
-    const validItems = items.filter(it => recipes.find(r=>r.id===it.id));
+    const items = (entries || []).map(e => typeof e === "object" ? e : { id: e });
+    const validItems = items.filter(it => recipes.find(r => r.id === it.id));
     if (validItems.length === 0) { alert("No cookable recipes in this meal yet."); return; }
     if (validItems.length === 1) {
-      const r = recipes.find(rec=>rec.id===validItems[0].id);
-      const scale = (validItems[0].servings && r.servings) ? (validItems[0].servings/r.servings) : 1;
+      const r = recipes.find(rec => rec.id === validItems[0].id);
+      const scale = (validItems[0].servings && r.servings) ? (validItems[0].servings / r.servings) : 1;
       startCookMode(r, scale);
     } else {
-      setDinnerCookMode({ steps: buildDinnerSteps(validItems), currentIndex: 0 });
+      startDinnerCook(validItems);
     }
   }
+
 
   return (
     <>
       <style>{STYLES}</style>
+      <style>{COOK_STYLES}</style>
       <div className="app">
         <header className="header">
           <div>
@@ -1279,7 +1240,7 @@ function RecipeBook() {
           }
           upsertRecipe(r); setTab("library");
         }} />}
-        {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; setDinnerCookMode({steps:buildDinnerSteps(dinnerSelection.map(id=>({id}))),currentIndex:0}); }} />}
+        {tab==="dinner" && <DinnerTab recipes={recipes} selection={dinnerSelection} setSelection={setDinnerSelection} onStartCook={()=>{ if(dinnerSelection.length<2)return; startDinnerCook(dinnerSelection.map(id=>({id}))); }} />}
         {tab==="import" && <ImportTab pendingShare={pendingShareData} onImport={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
@@ -1309,8 +1270,8 @@ function RecipeBook() {
           }
           upsertRecipe(r); setShowAdd(false); setEditRecipe(null);
         }} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
-      {cookMode && <CookModeOverlay steps={cookMode.steps} currentIndex={cookMode.currentIndex} onNav={dir=>setCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setCookMode(null)} />}
-      {dinnerCookMode && <CookModeOverlay steps={dinnerCookMode.steps} currentIndex={dinnerCookMode.currentIndex} onNav={dir=>setDinnerCookMode(c=>({...c,currentIndex:Math.max(0,Math.min(c.steps.length-1,c.currentIndex+dir))}))} onClose={()=>setDinnerCookMode(null)} isDinner />}
+      {cookMode && <CookModeOverlay plan={cookMode} onClose={()=>setCookMode(null)} />}
+      {dinnerCookMode && <CookModeOverlay plan={dinnerCookMode} isDinner onClose={()=>setDinnerCookMode(null)} />}
       {showSync && <SyncModal data={data} onImport={imported=>{
         // Merge: add recipes not already present by id
         setData(d=>{
@@ -1495,11 +1456,11 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
         </label>
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onEdit(safe)}>Edit</button>
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onAddToPlan(safe)}>📅 Plan</button>
-        <button className="recipe-action-btn recipe-action-btn-cook" onClick={()=>onCook(safe)}>▶ Cook</button>
+        <button className="recipe-action-btn recipe-action-btn-cook" onClick={()=>onCook(safe, scale)}>▶ Cook</button>
         <button className="recipe-action-btn recipe-action-btn-danger" onClick={()=>onDelete(safe.id)}>🗑</button>
       </div>
       <div className="detail-panel">
-        <DetailHero safe={safe} onCook={()=>onCook(safe)} onEdit={()=>onEdit(safe)} onDelete={()=>onDelete(safe.id)} onLightbox={onLightbox} />
+        <DetailHero safe={safe} onCook={()=>onCook(safe, scale)} onEdit={()=>onEdit(safe)} onDelete={()=>onDelete(safe.id)} onLightbox={onLightbox} />
 
         <div className="detail-content">
           <div className="detail-title">{safe.title}</div>
@@ -1715,60 +1676,545 @@ function AddToPlanModal({ recipe, onAssign, onClose, onQuickAddRecipe }) {
     </div>
   );
 }
-function scaleIngredientAmount(ing, scale) {
-  if (!ing || typeof ing !== "string" || !scale || scale === 1) return ing;
-  const fracMap = {"½":0.5,"⅓":1/3,"⅔":2/3,"¼":0.25,"¾":0.75,"⅛":0.125};
-  const s = ing.trim();
-  let m = s.match(/^(\d+)\s+(\d+)\/(\d+)(\s*-\s*[\d./]+)?/); // mixed number "1 1/2"
-  let value, len;
-  if (m && !m[4]) { value = parseInt(m[1]) + parseInt(m[2])/parseInt(m[3]); len = m[0].length; }
-  if (value === undefined) {
-    m = s.match(/^(\d+)\/(\d+)(\s*-\s*[\d./]+)?/); // simple fraction "1/2"
-    if (m && !m[3]) { value = parseInt(m[1])/parseInt(m[2]); len = m[0].length; }
-  }
-  if (value === undefined) {
-    m = s.match(/^(\d*\.\d+|\d+)(\s*-\s*[\d./]+)?/); // decimal or whole number
-    if (m && !m[2]) { value = parseFloat(m[1]); len = m[0].length; }
-  }
-  if (value === undefined) {
-    m = s.match(/^([½⅓⅔¼¾⅛])(\s*-\s*[\d./]+)?/); // unicode fraction
-    if (m && !m[2]) { value = fracMap[m[1]]; len = m[0].length; }
-  }
-  if (value === undefined) return ing; // ranges and unparseable leads are left as-is
-  const scaled = value * scale;
-  const rounded = Math.round(scaled * 100) / 100;
-  return String(rounded) + s.slice(len);
-}
-function parseIngAmount(ing) {
-  if (!ing || typeof ing !== "string") return { amount: "", name: ing || "" };
-  const frac = {"½":"1/2","⅓":"1/3","⅔":"2/3","¼":"1/4","¾":"3/4","⅛":"1/8"};
-  let s = ing.trim();
-  Object.entries(frac).forEach(([k,v])=>{ s=s.replace(k,v); });
-  const units = "tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|pinches|whole|large|medium|small|cloves?|heads?|bunch|bunches|pieces?|strips?|cans?|jars?";
-  const re = new RegExp("^([\\d\\s/.-]+(?:\\s*(?:" + units + "))?)\\s*(.*)$","i");
-  const m = s.match(re);
-  if (m) return { amount: m[1].trim(), name: m[2].replace(/^[,\s]+/,"").trim() };
-  return { amount: "", name: ing };
+// ── Cook Mode core (proposed) ─────────────────────────────────────────────
+// Pure functions, no React. Replaces scaleIngredientAmount / parseIngAmount /
+// extractKeywords / matchIngredients and the step-building in startCookMode /
+// buildDinnerSteps. Written to be pasted into index.html as-is (plain ES2020,
+// no imports); the module.exports guard at the bottom is for the Node harness.
+
+// ── Quantity parsing ─────────────────────────────────────────────────────
+const CM_FRAC = { "½":0.5, "⅓":1/3, "⅔":2/3, "¼":0.25, "¾":0.75, "⅛":0.125, "⅜":0.375, "⅝":0.625, "⅞":0.875 };
+// One numeric token: "1 1/2", "1½", "1.5", "3/4", "½", "2"
+const CM_NUM = "(?:\\d+\\s*[½⅓⅔¼¾⅛⅜⅝⅞]|\\d+\\s+\\d+\\/\\d+|\\d+\\/\\d+|\\d*\\.\\d+|\\d+|[½⅓⅔¼¾⅛⅜⅝⅞])";
+// A quantity = number, optionally a range "2-3", "2 to 3", "1/4 - 1/2"
+const CM_QTY_RE = new RegExp("^\\s*(" + CM_NUM + ")(?:\\s*(?:-|–|—|to|or)\\s*(" + CM_NUM + "))?");
+
+function cmNumValue(tok) {
+  if (!tok) return null;
+  tok = tok.trim();
+  let m;
+  if ((m = tok.match(/^(\d+)\s*([½⅓⅔¼¾⅛⅜⅝⅞])$/))) return +m[1] + CM_FRAC[m[2]];
+  if ((m = tok.match(/^(\d+)\s+(\d+)\/(\d+)$/))) return +m[1] + (+m[2] / +m[3]);
+  if ((m = tok.match(/^(\d+)\/(\d+)$/))) return +m[1] / +m[2];
+  if (CM_FRAC[tok] != null) return CM_FRAC[tok];
+  const n = parseFloat(tok);
+  return isNaN(n) ? null : n;
 }
 
-// ── Ingredient matcher ────────────────────────────────────────────────────
-function extractKeywords(ing) {
-  if (!ing || typeof ing !== "string") return [];
-  let s = ing.replace(/^[\d\s/½⅓⅔¼¾⅛.]+/, "");
-  s = s.replace(/\b(tbsp|tsp|cups?|oz|lbs?|kg|g|ml|l|pinch|whole|large|medium|small|fresh|dried|finely|chopped|diced|minced|grated|sliced|boneless|skinless)\b/gi, "");
-  s = s.replace(/[,(].*/, "");
-  return s.split(/\s+/).map(w=>w.toLowerCase().trim()).filter(w=>w.length>2);
+// Units we understand. key -> {aliases, kind}. kind: vol | wt | count | other
+const CM_UNITS = [
+  ["cup",   ["cup","cups","c","c."],                 "vol"],
+  ["tbsp",  ["tbsp","tbsp.","tbs","tbs.","tablespoon","tablespoons","tablspoons","T"], "vol"],
+  ["tsp",   ["tsp","tsp.","teaspoon","teaspoons","t"], "vol"],
+  ["oz",    ["oz","oz.","ounce","ounces"],           "wt"],
+  ["lb",    ["lb","lb.","lbs","lbs.","pound","pounds"], "wt"],
+  ["g",     ["g","gram","grams"],                    "wt"],
+  ["kg",    ["kg","kilogram","kilograms"],           "wt"],
+  ["ml",    ["ml","milliliter","milliliters","mL"],  "vol"],
+  ["l",     ["l","liter","liters","litre","litres"], "vol"],
+  ["qt",    ["qt","quart","quarts"],                 "vol"],
+  ["pint",  ["pint","pints","pt"],                   "vol"],
+  ["gallon",["gallon","gallons","gal"],              "vol"],
+  ["clove", ["clove","cloves"],                      "count"],
+  ["slice", ["slice","slices"],                      "count"],
+  ["strip", ["strip","strips"],                      "count"],
+  ["stick", ["stick","sticks"],                      "count"],
+  ["can",   ["can","cans"],                          "count"],
+  ["jar",   ["jar","jars"],                          "count"],
+  ["packet",["packet","packets","package","packages","pkg"], "count"],
+  ["bag",   ["bag","bags"],                          "count"],
+  ["bunch", ["bunch","bunches"],                     "count"],
+  ["sprig", ["sprig","sprigs"],                      "count"],
+  ["leaf",  ["leaf","leaves"],                       "count"],
+  ["head",  ["head","heads"],                        "count"],
+  ["ear",   ["ear","ears"],                          "count"],
+  ["rack",  ["rack","racks"],                        "count"],
+  ["piece", ["piece","pieces"],                      "count"],
+  ["pinch", ["pinch","pinches"],                     "other"],
+  ["dash",  ["dash","dashes"],                       "other"],
+  ["handful",["handful","handfuls"],                 "other"],
+  ["splash",["splash"],                              "other"],
+  ["squeeze",["squeeze"],                            "other"],
+  ["serving",["serving","servings"],                 "other"],
+];
+const CM_UNIT_INDEX = {};
+CM_UNITS.forEach(([key, aliases, kind]) => aliases.forEach(a => { CM_UNIT_INDEX[a.toLowerCase()] = { key, kind }; }));
+// Case-sensitive single-letter units only match exactly ("T" = tbsp, "t" = tsp)
+function cmLookupUnit(word) {
+  if (!word) return null;
+  if (word === "T") return { key:"tbsp", kind:"vol" };
+  if (word === "t") return { key:"tsp", kind:"vol" };
+  const w = word.toLowerCase();
+  if (w === "t") return null;
+  return CM_UNIT_INDEX[w] || null;
+}
+const CM_SIZE_WORDS = /^(large|medium|small|whole|extra-large|xl|jumbo|thick-cut|thin-cut|heaping|level|scant|generous|big)$/i;
+const CM_SECTION_RE = /^\s*(for the .*|for .*:|.*:\s*|keyword:.*|bowl \d.*|optional toppings?:?|nutrition|braise|fajita|coating|brine|crunch mix|egg wash|bruschetta marinara|for finishing the dish)\s*$/i;
+
+// Parse one ingredient line. `parsed` (optional) is the ingredients_parsed row
+// {qty, unit, item, prep} from the LLM parser; we trust it for item/unit and
+// use our own regex for the quantity (so ranges like "2-3 tbsp" survive).
+function parseIngLine(raw, parsed) {
+  const out = { raw: raw || "", qty: null, qtyMax: null, unit: null, unitKind: null, item: "", prep: "", header: false, sizeNote: "", qtyText: "" };
+  if (!raw || typeof raw !== "string") return out;
+  let s = raw.trim();
+  if (CM_SECTION_RE.test(s) && !/^\s*[\d½⅓⅔¼¾⅛]/.test(s)) { out.header = true; out.item = s.replace(/:\s*$/, ""); return out; }
+  if (parsed && parsed.item == null && parsed.qty == null && parsed.unit == null) { out.header = true; out.item = s.replace(/:\s*$/, ""); return out; }
+
+  // Word numbers at the start or after "juice/zest of": "two lemons", "Juice of one lime"
+  s = s.replace(/^(juice of |zest of )?(a|an|one|two|three|four|five|six|eight|ten|twelve|half a|half an)\s+(?=[a-z])/i, (m, pre, w) => (pre || "") + ({a:1,an:1,one:1,two:2,three:3,four:4,five:5,six:6,eight:8,ten:10,twelve:12,"half a":0.5,"half an":0.5})[w.toLowerCase()] + " ");
+  // Quantity at the start
+  let rest = s;
+  const qm = s.match(CM_QTY_RE);
+  if (qm) {
+    out.qty = cmNumValue(qm[1]);
+    out.qtyMax = qm[2] ? cmNumValue(qm[2]) : null;
+    out.qtyText = qm[0].trim();
+    rest = s.slice(qm[0].length);
+  } else {
+    // "Juice of 1 lime", "Potatoes, Baby 1 1/2 pounds" — number later in the line
+    const inner = s.match(new RegExp("(^|\\s)(" + CM_NUM + ")(?:\\s*(?:-|–|to)\\s*(" + CM_NUM + "))?\\s+([A-Za-z.]+)"));
+    if (inner && (cmLookupUnit(inner[4]) || /^(juice|zest) of /i.test(s))) {
+      out.qty = cmNumValue(inner[2]); out.qtyMax = inner[3] ? cmNumValue(inner[3]) : null;
+      out.qtyText = (inner[2] + (inner[3] ? "-" + inner[3] : "")).trim();
+      const iu = cmLookupUnit(inner[4]);
+      if (iu) { out.unit = iu.key; out.unitKind = iu.kind; out.item = s.replace(inner[0], " ").replace(/\s+/g, " ").replace(/^[,\s]+|[,\s]+$/g, ""); }
+      else { out.item = s.replace(/^(juice|zest) of /i, "").replace(inner[2] + (inner[3] ? "" : ""), "").replace(/\s+/g, " ").trim(); out.prep = /^juice/i.test(s) ? "juiced" : "zested"; }
+      out._inlineQty = true;
+    }
+  }
+  // Size note: "1 (3-4 pounds) chuck roast", "1 12-14 pound brisket", "1 28-ounce can"
+  let sm = rest.match(/^\s*\(([^)]*\d[^)]*)\)\s*/);
+  if (sm) { out.sizeNote = sm[1]; rest = rest.slice(sm[0].length); }
+  else if ((sm = rest.match(new RegExp("^\\s*(" + CM_NUM + "(?:\\s*(?:-|–|to)\\s*" + CM_NUM + ")?\\s*-?\\s*(?:oz|ounce|pound|lb|lbs|inch|g)\\.?)\\b\\s*")))) { out.sizeNote = sm[1]; rest = rest.slice(sm[0].length); }
+  // Unit
+  if (!out.unit) {
+    const um = rest.match(/^\s*([A-Za-z.]+)\b\.?\s*/);
+    if (um) {
+      const u = cmLookupUnit(um[1].replace(/\.$/, ""));
+      if (u) { out.unit = u.key; out.unitKind = u.kind; rest = rest.slice(um[0].length); rest = rest.replace(/^(of\s+)/i, ""); }
+      else if (CM_SIZE_WORDS.test(um[1])) { out.sizeNote = out.sizeNote || um[1]; rest = rest.slice(um[0].length); }
+    }
+  }
+  if (!out.item) {
+    // Item = text up to first comma / paren; prep = the rest
+    const cut = rest.search(/[,(]/);
+    out.item = (cut >= 0 ? rest.slice(0, cut) : rest).trim();
+    out.prep = cut >= 0 ? rest.slice(cut).replace(/^[,\s]+/, "").replace(/^\((.*)\)$/, "$1").trim() : "";
+  }
+  if (out.qty == null && out.unit == null && out.item === "" ) out.item = s;
+  // Prefer the LLM parse for item/prep/unit when available (it handles
+  // "Potatoes, Baby", brand names, "Juice of 1 lime" ...). Keep our qty.
+  if (parsed && typeof parsed === "object") {
+    if (parsed.item) out.item = parsed.item;
+    if (parsed.prep) out.prep = parsed.prep;
+    if (parsed.unit && !out.unit && !out.sizeNote) { const u = cmLookupUnit(parsed.unit); if (u) { out.unit = u.key; out.unitKind = u.kind; } else if (parsed.unit !== "each") { out.unit = parsed.unit; out.unitKind = "count"; } }
+    if (out.qty == null && typeof parsed.qty === "number") out.qty = parsed.qty;
+  }
+  if (out.qty != null && out.unit == null) out.unitKind = "count";
+  return out;
 }
 
-function matchIngredients(stepText, ingredients) {
-  if (!stepText || typeof stepText !== "string") return [];
-  const stepLower = stepText.toLowerCase();
-  return (ingredients||[]).filter(ing => {
-    if (!ing || typeof ing !== "string") return false;
-    const keywords = extractKeywords(ing);
-    return keywords.some(kw => new RegExp("\\b" + kw, "i").test(stepLower));
+// ── Formatting scaled quantities ─────────────────────────────────────────
+const CM_FRACS = [[0.125,"⅛"],[0.25,"¼"],[1/3,"⅓"],[0.375,"⅜"],[0.5,"½"],[0.625,"⅝"],[2/3,"⅔"],[0.75,"¾"],[0.875,"⅞"]];
+function cmFormatNumber(n, kind) {
+  if (n == null || isNaN(n)) return "";
+  if (kind === "metric") { const r = n >= 10 ? Math.round(n) : Math.round(n * 10) / 10; return String(r); }
+  const whole = Math.floor(n + 1e-9);
+  const rem = n - whole;
+  if (rem < 0.04) return String(whole);
+  const f = CM_FRACS.find(([v]) => Math.abs(rem - v) < 0.04);
+  if (f) return whole > 0 ? whole + " " + f[1] : f[1];
+  if (rem > 0.96) return String(whole + 1);
+  const r = Math.round(n * 100) / 100;
+  return String(r);
+}
+// Choose a friendlier unit when the scaled amount lands on a clean multiple
+function cmNormalizeUnit(n, unit) {
+  if (n == null) return { n, unit };
+  const near = (x, step) => Math.abs(x / step - Math.round(x / step)) < 0.02;
+  if (unit === "tsp" && n >= 3 && near(n, 3)) return { n: n / 3, unit: "tbsp" };      // 6 tsp -> 2 tbsp
+  if (unit === "tbsp" && n >= 8 && near(n, 4)) return { n: n / 16, unit: "cup" };    // 16 tbsp -> 1 cup, 8 tbsp -> ½ cup
+  if (unit === "tbsp" && n < 1 && near(n * 3, 1)) return { n: n * 3, unit: "tsp" };   // ⅓ tbsp -> 1 tsp
+  if (unit === "cup" && n < 0.25 && near(n * 16, 1)) return { n: n * 16, unit: "tbsp" }; // ⅛ cup -> 2 tbsp
+  if (unit === "oz" && n >= 16 && near(n, 16)) return { n: n / 16, unit: "lb" };
+  return { n, unit };
+}
+// If a scaled amount has no clean fraction in its unit, step down a unit (⅓ cup ÷ 2 = 2 ⅔ tbsp; ⅛ tsp ÷ 2 = pinch)
+function cmBestUnit(n, unit) {
+  const clean = x => { const r = x - Math.floor(x + 1e-9); return r < 0.04 || r > 0.96 || CM_FRACS.some(([v]) => Math.abs(r - v) < 0.04); };
+  if (n == null || clean(n)) return { n, unit };
+  if (unit === "cup" && clean(n * 16)) return { n: n * 16, unit: "tbsp" };
+  if (unit === "cup" && clean(n * 48)) return { n: n * 48, unit: "tsp" };
+  if (unit === "tbsp" && clean(n * 3)) return { n: n * 3, unit: "tsp" };
+  if (unit === "tsp" && n < 0.125) return { n: 1, unit: "pinch" };
+  if (unit === "lb" && clean(n * 16)) return { n: n * 16, unit: "oz" };
+  return { n, unit };
+}
+function cmUnitLabel(unit, n) {
+  if (!unit) return "";
+  const plural = n != null && n > 1;
+  const map = { cup:"cup", tbsp:"tbsp", tsp:"tsp", oz:"oz", lb:"lb", g:"g", kg:"kg", ml:"ml", l:"L", qt:"qt", pint:"pint", gallon:"gallon", clove:"clove", slice:"slice", strip:"strip", stick:"stick", can:"can", jar:"jar", packet:"packet", bag:"bag", bunch:"bunch", sprig:"sprig", leaf:"leaf", head:"head", ear:"ear", rack:"rack", piece:"piece", pinch:"pinch", dash:"dash", handful:"handful", splash:"splash", squeeze:"squeeze", serving:"serving" };
+  let u = map[unit] || unit;
+  if (plural && ["cup","clove","slice","strip","stick","can","jar","packet","bag","bunch","sprig","head","ear","rack","piece","pinch","dash","handful","serving","quart","pint","gallon"].includes(u)) u += "s";
+  if (plural && u === "leaf") u = "leaves";
+  return u;
+}
+// Scale a parsed ingredient. Returns {amount, unit, item, prep, sizeNote, text, changed}
+function scaleIng(p, scale) {
+  const s = scale && scale > 0 ? scale : 1;
+  if (p.header) return { ...p, amount: "", text: p.item, changed: false };
+  if (p.qty == null) return { ...p, amount: "", text: p.raw, changed: false };
+  let a = cmBestUnit(...Object.values(cmNormalizeUnit(p.qty * s, p.unit)).slice(0, 2));
+  a = cmBestUnit(a.n, a.unit);
+  const kindOf = u => (u === "g" || u === "kg" || u === "ml" || u === "l") ? "metric" : "vol";
+  let amount = cmFormatNumber(a.n, kindOf(a.unit));
+  let unit = a.unit;
+  if (p.qtyMax != null) {
+    const b = cmNormalizeUnit(p.qtyMax * s, p.unit);
+    if (b.unit === unit) amount += "–" + cmFormatNumber(b.n, kindOf(b.unit));
+    else { amount = cmFormatNumber(p.qty * s) + "–" + cmFormatNumber(p.qtyMax * s); unit = p.unit; }
+  }
+  const unitLabel = cmUnitLabel(unit, a.n);
+  const bits = [amount, unitLabel].filter(Boolean).join(" ");
+  const sizeTxt = p.sizeNote ? (/^(large|medium|small|whole|extra-large|jumbo)$/i.test(p.sizeNote) ? p.sizeNote : "(" + p.sizeNote.replace(/pounds?/i, "lb").replace(/ounces?/i, "oz") + ")") : "";
+  let itemTxt = p.item;
+  if (!unit && a.n != null && p.item && !/\s(and|or|&)\s/i.test(p.item)) { const w = p.item.split(/\s+/); const last = w[w.length - 1]; if (a.n > 1 && !/s$/i.test(last)) w[w.length - 1] = cmPluralize(last, a.n); else if (a.n <= 1 && /s$/i.test(last) && !/ss$/i.test(last)) w[w.length - 1] = cmPluralize(last, a.n); itemTxt = w.join(" "); }
+  const namePart = [sizeTxt, itemTxt].filter(Boolean).join(" ");
+  return { ...p, amount: bits, unit, item: itemTxt, text: (bits + " " + namePart).trim() + (p.prep ? ", " + p.prep : ""), changed: s !== 1 };
+}
+
+// ── Ingredient ↔ step matching ───────────────────────────────────────────
+// Strategy (in order of confidence):
+//   3 = the ingredient's full item phrase is in the step ("smoked paprika")
+//   2 = the ingredient's group tag is in the step ("(Nashville seasoning)", "for the brine")
+//   1 = a distinctive key word of the item is in the step ("chicken" for "chicken breast",
+//       "salt" for "kosher salt") and no other ingredient owns that occurrence
+// Rejections: the occurrence is part of a compound that means something else
+// ("onion powder" ≠ onion, "bell pepper" ≠ black pepper, "chipotle peppers" ≠ cayenne pepper),
+// or another ingredient's full phrase covers it. Generic words (salt, oil, sauce,
+// cheese, water…) only match on their own when the item IS that word, or via the
+// category rule (step says "cheese", recipe has exactly one cheese).
+const CM_STOP = new Set(["and","or","of","the","a","an","with","for","to","in","on","your","favorite","favourite","fresh","freshly","ground","large","medium","small","whole","extra","virgin","thick","thin","cut","sliced","diced","minced","chopped","grated","shredded","crushed","dried","dry","packed","light","dark","coarse","fine","finely","kosher","sea","table","plus","more","about","approx","approximately","optional","boneless","skinless","store","bought","cooked","uncooked","raw","hot","cold","warm","low","sodium","unsalted","salted","sweet","mild","spicy","style","brand","quality","good","best","each","other","any","some","all","half","quarter","lean","bone","frank","mixed","new","old","fashioned","regular","plain","pure","real","natural","organic","homemade","prepared","instant","quick","ripe","baby","jumbo","big","frozen","canned","jarred","bottled","unseasoned","seasoned","purpose","smoked","roasted","grilled","fried","baked","toasted","melted","softened","browned","caramelized","pickled","marinated","brined","glazed","candied","crumbled","crushed","shaved","cubed","peeled","trimmed","washed","rinsed","drained","reserved","remaining","leftover","additional","warm","warmed","heated","hot"]);
+const CM_GENERIC = new Set(["salt","pepper","oil","water","sauce","seasoning","cheese","sugar","juice","powder","mix","rub","stock","broth","flakes","flake","paste","cream","milk","wine","vinegar","butter","flour","seed","leaf","bag","can","jar","bowl","pan","meat","piece","bean","corn","rice","chunk","wood","bit","dressing","glaze","topping","marinade","marinara","brine","coating","wash","spice","chip","crumb","dip","liquid","fat","grease","drippings","dripping","zest","rind","syrup","extract","mixture","blend"]);
+const CM_COMPOUND_TAILS = new Set(["powder","salt","paste","sauce","juice","zest","stock","broth","flake","seed","oil","water","vinegar","wine","cream","milk","butter","dressing","mix","seasoning","rub","glaze","bread","crumb","chip","jelly","jam","rind","peel","syrup","extract","sugar","pepper","ring","press","grease","fat","dripping","skin","cube","strip","chunk","bone","breast","thigh","wing","noodle","pasta","flour","starch","meal","puree","soup","gravy","flavor","flavoring","spray","pan","dish","bag","bowl","water","pot","mixture","blend","salt"]);
+const CM_COMPOUND_HEADS = new Set(["bell","red","green","yellow","orange","black","white","cayenne","chili","chile","chipotle","jalapeno","sweet","sour","hot","crushed","ground","pasta","salted","bacon","peanut","olive","vegetable","canola","sesame","cooking","brown","powdered","garlic","onion","tomato","lemon","lime","apple","cider","kosher","sea","table","chicken","beef","pork","coconut","almond","soy","fish","heavy","whipping","cream","cheddar","parmesan","mozzarella","ricotta","goat","blue","dry","dried","rice","corn","wheat","bread","ice","rock","celery","seasoned","smoked","liquid","balsamic","wine","maple","honey","bbq","barbecue","buffalo","ranch","italian","cajun","taco","fajita","steak","egg","pickle","dill"]);
+const CM_MODIFIER_OK = new Set(["kosher","sea","table","fresh","freshly","ground","crushed","dry","dried","coarse","fine","finely","cracked","flaky","extra","virgin","light","dark","packed","cold","warm","hot","melted","softened","unsalted","salted","large","medium","small","whole","thin","thick","diced","sliced","minced","chopped","grated","shredded","cooked","raw","frozen","fresh"]);
+const CM_STEM = { salted:"salt", buttered:"butter", oiled:"oil", floured:"flour", peppered:"pepper", sugared:"sugar", hamburger:"ground beef", hotdogs:"hot dog", hotdog:"hot dog" };
+const CM_CATEGORY = { cheese: ["pecorino","parmesan","parm","gruyere","cheddar","mozzarella","ricotta","cotija","provolone","colby","feta","brie","gouda","swiss","jack","asiago","romano","fontina","mascarpone","velveeta","havarti","muenster"], herb: ["basil","parsley","cilantro","thyme","rosemary","oregano","chive","dill","sage","mint"], meat: ["chicken","beef","pork","steak","turkey","lamb","brisket","sausage","bacon","pancetta","shrimp","salmon","fish"] };
+const CM_GROUP_WORDS = new Set(["brine","dredge","marinade","rub","slaw","coating","batter","filling","crust","dressing","seasoning","glaze","topping","wash","garnish","sauce","gravy","dip","drizzle","frosting","icing","crumble","streusel","dough","base"]);
+
+function cmSingular(w) {
+  if (CM_STEM[w]) return CM_STEM[w];
+  if (w.length < 4) return w;
+  if (/(ss|us|is|ous)$/.test(w)) return w;
+  if (/ies$/.test(w)) return w.slice(0, -3) + "y";
+  if (/(oes|ches|shes|sses|xes)$/.test(w)) return w.slice(0, -2);
+  if (/^(leaves|halves|knives|loaves|calves|shelves)$/.test(w)) return w.slice(0, -3) + "f";
+  if (/s$/.test(w)) return w.slice(0, -1);
+  return w;
+}
+// Tokenize: lower-case, strip accents, treat , ; : . ( ) / as boundaries ("|")
+function cmTokens(str) {
+  const t = (str || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[’']/g, "");
+  return t.replace(/[,;:.()\/\[\]!?]+/g, " | ").replace(/[^a-z0-9|\s-]/g, " ").replace(/-/g, " ").split(/\s+/).filter(Boolean)
+    .flatMap(w => { const st = CM_STEM[w]; return st && st.includes(" ") ? st.split(" ") : [w]; });
+}
+function cmWords(str) { return cmTokens(str).filter(w => w !== "|"); }
+function cmFindPhrase(arr, phraseWords) {
+  const hits = [];
+  for (let i = 0; i + phraseWords.length <= arr.length; i++) {
+    let ok = true;
+    for (let j = 0; j < phraseWords.length; j++) if (arr[i + j] !== phraseWords[j]) { ok = false; break; }
+    if (ok) hits.push(i);
+  }
+  return hits;
+}
+function cmGroupTag(p) {
+  // "(Nashville seasoning)", "(for brine)", "for the sauce", "for dredge, unseasoned"
+  const src = [p.prep || "", (p.raw.match(/\(([^)]*)\)/) || [])[1] || ""].join(" | ");
+  const m = src.match(/\b(?:for (?:the )?)?([a-z][a-z ]{2,30}?)(?:\s*\||,|$)/i);
+  const cand = src.split(/[|,]/).map(x => x.trim().replace(/^for (the )?/i, "")).filter(Boolean);
+  for (const c of cand) {
+    const w = cmWords(c).map(cmSingular).filter(x => !["optional","to","taste","divided","or","more","less","as","needed","about","plus","extra"].includes(x));
+    if (!w.length || w.length > 4) continue;
+    if (w.length >= 2 && !w.every(x => CM_STOP.has(x))) return w;
+    if (w.length === 1 && CM_GROUP_WORDS.has(w[0])) return w;
+  }
+  return null;
+}
+function cmProfile(p, idx) {
+  const full = cmWords(p.item).map(cmSingular);
+  const core = full.filter(w => !CM_STOP.has(w));
+  const words = core.length ? core : full;
+  const head = words.length ? words[words.length - 1] : "";
+  const phrases = [];
+  const seen = new Set();
+  const addPh = ph => { const k = ph.join(" "); if (ph.length && !seen.has(k)) { seen.add(k); phrases.push(ph); } };
+  addPh(full);
+  for (let k = 1; k <= full.length - 2; k++) addPh(full.slice(k));   // "louisiana style hot sauce" -> "style hot sauce" -> "hot sauce"
+  addPh(core);
+  if (core.length > 2) addPh(core.slice(1));
+  const keys = words.filter(w => !CM_GENERIC.has(w) && w.length > 2);
+  if (!keys.includes(head) && head) keys.push(head);   // generic head nouns ("pepper", "flour", "seasoning") are keys too, guarded in pass 3
+  const cats = Object.keys(CM_CATEGORY).filter(c => full.some(w => CM_CATEGORY[c].includes(w)) || full.includes(c));
+  return { idx, p, full, words, head, phrases, keys, cats, generic: words.length === 1 && CM_GENERIC.has(words[0]), tag: cmGroupTag(p) };
+}
+function matchStepIngredients(stepText, ings) {
+  if (!stepText || !ings || !ings.length) return [];
+  const toks = cmTokens(stepText).map(w => w === "|" ? "|" : cmSingular(w));
+  const profiles = ings.map((p, i) => cmProfile(p, i)).filter(pr => !pr.p.header && pr.full.length > 0);
+  const results = new Map();
+  const claim = (pr, strength) => { const cur = results.get(pr.idx); if (!cur || cur < strength) results.set(pr.idx, strength); };
+  const covered = new Set(); // token positions owned by a full-phrase match
+  const prevOf = h => toks[h - 1], nextOf = (h, n) => toks[h + n];
+  const anyOtherOwns = (pr, h, n) => profiles.some(o => o.idx !== pr.idx && o.full.length > n && cmFindPhrase(toks, o.full).some(oh => oh <= h && h < oh + o.full.length));
+
+  // "all (the) ingredients" / "remaining ingredients"
+  if (/\b(all|remaining) (of )?(the )?(your )?ingredients\b/i.test(stepText)) profiles.forEach(pr => { if (pr.p.qty != null) claim(pr, 2); });
+
+  // coverage = how many of the ingredient's own descriptive words appear in the step (for tie-breaks)
+  const tokSet = new Set(toks);
+  const coverage = pr => pr.full.filter(w => !["and","or","of","the","a","an","with","for","to"].includes(w) && tokSet.has(w)).length;
+  // Pass 1: full phrases
+  for (const pr of profiles) {
+    for (const ph of pr.phrases) {
+      let hits = cmFindPhrase(toks, ph).filter(h => !anyOtherOwns(pr, h, ph.length));
+      if (hits.length && ph !== pr.phrases[0]) {
+        // same partial phrase claimed by another ingredient with better coverage ("kosher salt and pepper" vs "sea salt and pepper")
+        const rivals = profiles.filter(o => o.idx !== pr.idx && o.phrases.some(op => op.join(" ") === ph.join(" ")));
+        if (rivals.length && rivals.some(o => coverage(o) > coverage(pr))) hits = [];
+      }
+      const ok = hits.filter(h => {
+        const next = nextOf(h, ph.length), prev = prevOf(h);
+        if (ph.length === 1) {
+          if (next && next !== "|" && CM_COMPOUND_TAILS.has(next) && !pr.full.includes(next) && !cmWords(pr.p.prep).includes(next)) return false;
+          if (prev && prev !== "|" && CM_COMPOUND_HEADS.has(prev) && !pr.full.includes(prev) && !CM_MODIFIER_OK.has(prev)) return false;
+          if (prev && prev !== "|" && !pr.full.includes(prev) && profiles.some(o => o.idx !== pr.idx && (o.keys.includes(prev) || (CM_MODIFIER_OK.has(prev) && o.full.includes(prev) && o.full.includes(ph[ph.length-1]))))) return false; // "chipotle-bourbon sauce" ≠ bbq sauce; "kosher salt" ≠ sea salt when both exist
+          if (next && next !== "|" && !pr.full.includes(next) && profiles.some(o => o.idx !== pr.idx && o.keys.includes(next))) return false; // "chipotle-bourbon" = a made thing
+        }
+        return true;
+      });
+      if (ok.length) { claim(pr, 3); ok.forEach(h => { for (let k = 0; k < ph.length; k++) covered.add(h + k + ":" + pr.idx); }); break; }
+    }
+  }
+  // Pass 2: group tags ("Nashville seasoning", "egg wash", "brine")
+  for (const pr of profiles) {
+    if (results.has(pr.idx) || !pr.tag) continue;
+    if (pr.tag.length >= 2) { if (cmFindPhrase(toks, pr.tag).length) claim(pr, 2); }
+    else {
+      const t = pr.tag[0];
+      const re = new RegExp("(^|\\b(the|make the|for the|into the|in the|to the|prepare the|with the)\\s+)" + t + "s?\\b|^\\s*[A-Za-z ]*" + t + "\\s*\\d*\\s*:", "i");
+      if (re.test(stepText.toLowerCase())) claim(pr, 2);
+    }
+  }
+  // Pass 3: key words with ambiguity resolution
+  const keyOwners = {};
+  profiles.forEach(pr => pr.keys.forEach(k => { (keyOwners[k] = keyOwners[k] || []).push(pr); }));
+  for (const [key, owners] of Object.entries(keyOwners)) {
+    const hits = cmFindPhrase(toks, [key]);
+    for (const h of hits) {
+      const prev = prevOf(h), next = nextOf(h, 1);
+      let cands = owners.filter(pr => {
+        if (anyOtherOwns(pr, h, 1)) return false;
+        if (next && next !== "|" && CM_COMPOUND_TAILS.has(next) && !pr.full.includes(next) && !cmWords(pr.p.prep).includes(next) && !(key === "salt" && next === "water")) return false;
+        if (prev && prev !== "|" && CM_COMPOUND_HEADS.has(prev) && !pr.full.includes(prev) && !CM_MODIFIER_OK.has(prev)) return false;
+        if (prev && prev !== "|" && !pr.full.includes(prev) && profiles.some(o => o.idx !== pr.idx && (o.keys.includes(prev) || (CM_MODIFIER_OK.has(prev) && o.full.includes(prev) && o.full.includes(key))))) return false;
+        if (next && next !== "|" && !pr.full.includes(next) && profiles.some(o => o.idx !== pr.idx && o.keys.includes(next))) return false;
+        if (CM_GROUP_WORDS.has(key) && pr.full.length > 1 && !(prev === "|" || ["with","of","add","in","and","some","more","plus","stir","whisk","pour","sprinkle","both","enough","drizzle","brush","toss","spoon","top"].includes(prev) || /^\d/.test(prev || "") || cmLookupUnit(prev || ""))) return false; // "Sauce:" / "the sauce" = the thing being made
+        if (CM_GENERIC.has(key) && prev && prev !== "|" && !CM_MODIFIER_OK.has(prev) && !["with","of","add","and","the","some","more","in","little","sprinkle","season","pinch","dash","to","your","a","reserved","remaining","cooked","drained","stir","whisk","into","over","plus","both","enough","much"].includes(prev) && !/^\d/.test(prev) && !cmLookupUnit(prev)) return false;
+        return true;
+      });
+      if (!cands.length) continue;
+      // prefer: item whose modifier matches the word before ("sea salt" for "sea"), then fewest words
+      const withMod = cands.filter(pr => prev && prev !== "|" && pr.full.includes(prev));
+      if (withMod.length) cands = withMod;
+      const minLen = Math.min(...cands.map(pr => pr.full.length));
+      const exact = cands.filter(pr => pr.full.length === minLen);
+      exact.forEach(pr => { if (!results.has(pr.idx)) claim(pr, 1); });
+    }
+  }
+  // Pass 4: category words — step says "cheese"/"herbs"/"meat", recipe has 1-3 such ingredients none matched yet
+  for (const [cat, list] of Object.entries(CM_CATEGORY)) {
+    if (!cmFindPhrase(toks, [cat]).length) continue;
+    const owners = profiles.filter(pr => pr.cats.includes(cat));
+    if (owners.length && owners.length <= 3 && !owners.some(pr => results.has(pr.idx))) owners.forEach(pr => claim(pr, 1));
+  }
+  return [...results.entries()].sort((a, b) => a[0] - b[0]).map(([idx, strength]) => ({ idx, strength }));
+}
+
+// ── Scaling numbers inside step text ─────────────────────────────────────
+// Only numbers that are clearly an ingredient quantity get scaled:
+//   number + cooking unit + (within 3 words) a matched ingredient's item/head
+//   number + ingredient count noun ("3 eggs", "2 limes")
+// Never: temperatures, times, inches/pan sizes, "x", percentages, step numbers,
+// "1 part", "2 at a time", numbers followed by "-inch" / "quart".
+const CM_UNIT_WORD_RE = "(cups?|c\\.|tbsps?|tbs|tablespoons?|tsps?|teaspoons?|oz|ounces?|lbs?|pounds?|grams?|g|kg|ml|liters?|cloves?|slices?|strips?|sticks?|cans?|jars?|packets?|sprigs?|leaves|handfuls?|pinch(?:es)?|dash(?:es)?|quarts?|pints?|ears?|racks?|bags?|heads?)";
+const CM_NOSCALE_AFTER = /^\s*(°|º|degrees?|f\b|c\b|f\)|℉|%|-?\s*inch|-?\s*in\b|"|″|''|x\s*\d|-?\s*quart|-?\s*qt|-?\s*minutes?|-?\s*mins?|-?\s*hours?|-?\s*hrs?|-?\s*seconds?|-?\s*secs?|-?\s*days?|:\s*\d|-?\s*(?:foot|feet|ft)\b|-?\s*(?:cm|mm)\b|(?:st|nd|rd|th)\b|-?\s*part|-?\s*parts|-?\s*times|-?\s*layers?|-?\s*batches|-?\s*bowls?|-?\s*at a time|-?\s*equal|-?\s*portions?|-?\s*servings?|-?\s*people|-?\s*point|-?\s*ply)/i;
+const CM_NOSCALE_BEFORE = /(step|steps|bowl|bowls|#|no\.|number|at|reaches|hits|reads|internal|temp|temperature|oven|smoker|grill|griddle|preheat|between|fry at|in\s+bowl|every|per|serves|makes|yields?)\s*$/i;
+const CM_PER_SERVING = /\b(each serving|per serving|per person|for each serving|per plate|per bowl|to prepare each)\b/i;
+function cmPluralize(word, n) {
+  if (!word) return word;
+  const isPlural = /s$/i.test(word) && !/ss$/i.test(word);
+  if (n > 1 && !isPlural) { if (/(o|ch|sh|ss|x)$/i.test(word)) return word + "es"; if (/[^aeiou]y$/i.test(word)) return word.slice(0, -1) + "ies"; return word + "s"; }
+  if (n <= 1 && isPlural) { if (/oes$/i.test(word)) return word.slice(0, -2); if (/ies$/i.test(word)) return word.slice(0, -3) + "y"; if (/(ches|shes|sses|xes)$/i.test(word)) return word.slice(0, -2); return word.slice(0, -1); }
+  return word;
+}
+// Wrap scaled numbers in ‹ › so the UI can highlight them (or pass a custom wrap fn)
+function scaleStepText(text, scale, ings, matched, wrap) {
+  const s = scale && scale > 0 ? scale : 1;
+  if (s === 1 || !text) return { text, scaledCount: 0, unscaledQtyCount: 0 };
+  // "per serving" instructions describe one plate: those numbers do not scale with the batch
+  if (CM_PER_SERVING.test(text)) return { text, scaledCount: 0, unscaledQtyCount: 0, perServing: true };
+  wrap = wrap || (x => "‹" + x + "›");
+  const matchedIngs = (matched || []).map(m => ings[m.idx]).filter(Boolean);
+  const candidateWords = new Set();
+  matchedIngs.forEach(p => { const w = cmWords(p.item).map(cmSingular).filter(x => !CM_STOP.has(x)); w.forEach(x => candidateWords.add(x)); });
+  const numRe = new RegExp("(^|[\\s(])(" + CM_NUM + ")(\\s*(?:-|–|—|to)\\s*(" + CM_NUM + "))?(\\s*)([A-Za-z\\u00b0\\u00ba\"″'%.#:-][A-Za-z.\\-]*)?", "g");
+  let scaledCount = 0, unscaledQtyCount = 0;
+  const out = text.replace(numRe, (m, pre, num, rangePart, num2, sp, after, offset) => {
+    const before = text.slice(Math.max(0, offset - 40), offset + pre.length);
+    const tail = text.slice(offset + pre.length + num.length + (rangePart || "").length);
+    const afterWord = (after || "").replace(/[.:]$/, "");
+    if (CM_NOSCALE_AFTER.test(tail)) return m;
+    if (CM_NOSCALE_BEFORE.test(before)) return m;
+    if (/^\d+$/.test(num) && /^\s*\d/.test(tail)) return m; // "13 x 9", "1 12-14 pound"
+    const unitHit = afterWord && new RegExp("^" + CM_UNIT_WORD_RE + "$", "i").test(afterWord) && cmLookupUnit(afterWord.replace(/\.$/, ""));
+    // technique / ratio phrases: "2 tbsp at a time", "1 tbsp salt for every 2 quarts", "2 tsp per serving"
+    const afterUnit = unitHit ? tail.slice(tail.indexOf(after) + after.length) : tail;
+    if (/^\s*(at a time|apiece|each\b(?! of)|per\b|for every|for each|to every|of \w+ for every)/i.test(afterUnit)) return m;
+    if (/^[^.;]{0,50}\b(for every|for each|to every)\b/i.test(afterUnit)) return m;
+    const nextWords = cmWords(tail).slice(0, 5).map(cmSingular);
+    // find the ingredient this number belongs to
+    let ingP = null;
+    if (unitHit) {
+      const w = nextWords.slice(1, 5);
+      ingP = matchedIngs.find(p => cmWords(p.item).map(cmSingular).some(iw => !CM_STOP.has(iw) && w.includes(iw)));
+      if (!ingP) { unscaledQtyCount++; return m; }
+      // unit kinds must be compatible (don't scale "2 cups pasta water" against "1 lb pasta")
+      if (ingP.unitKind && ingP.unitKind !== "count" && ingP.unitKind !== "other" && unitHit.kind !== ingP.unitKind) { unscaledQtyCount++; return m; }
+    } else {
+      const nw = nextWords[0];
+      ingP = matchedIngs.find(p => { const iw = cmWords(p.item).map(cmSingular); return iw.length && iw[iw.length - 1] === nw && (p.unitKind === "count" || p.unit == null); });
+      if (!ingP || ingP.qty == null) return m;
+      if (["egg","onion","lime","lemon","tomato","potato","jalapeno","jalapeño","clove","pepper","breast","thigh","bun","tortilla","hot","dog","garlic","shallot","chicken","steak","rib","cob","ear","sausage","hotdog","brisket","apple","orange","banana","avocado","carrot","cucumber","zucchini"].indexOf(nw) < 0 && !candidateWords.has(nw)) return m;
+    }
+    const v1 = cmNumValue(num), v2 = num2 ? cmNumValue(num2) : null;
+    if (v1 == null) return m;
+    let n1 = v1 * s, n2 = v2 != null ? v2 * s : null, unit = unitHit ? unitHit.key : null;
+    let a = unit ? cmNormalizeUnit(n1, unit) : { n: n1, unit };
+    let txt = cmFormatNumber(a.n, unitHit && unitHit.kind === "wt" ? "wt" : "vol");
+    if (n2 != null) { const b = unit ? cmNormalizeUnit(n2, unit) : { n: n2, unit }; if (b.unit === a.unit) txt += "–" + cmFormatNumber(b.n, unitHit && unitHit.kind === "wt" ? "wt" : "vol"); else { a = { n: n1, unit }; txt = cmFormatNumber(n1) + "–" + cmFormatNumber(n2); } }
+    scaledCount++;
+    let unitOut = "";
+    const nShown = n2 != null ? Math.max(a.n, n2) : a.n;
+    const longForm = { tbsp:"tablespoon", tsp:"teaspoon", cup:"cup", oz:"ounce", lb:"pound" };
+    const isLong = afterWord.length > 4 || /^cups?$/i.test(afterWord);
+    if (unitHit) unitOut = a.unit === unit ? (isLong ? cmPluralize(afterWord, nShown) : afterWord) : (isLong && longForm[a.unit] ? cmPluralize(longForm[a.unit], nShown) : cmUnitLabel(a.unit, nShown));
+    const restAfter = unitHit ? (after || "").slice(afterWord.length) : (after || "");
+    if (!unitHit && after) { const nounOut = cmPluralize(afterWord, nShown) + (after || "").slice(afterWord.length); return pre + wrap(txt) + sp + nounOut; }
+    return pre + wrap(txt + (unitHit ? sp + unitOut : "")) + (unitHit ? restAfter : sp + (after || ""));
   });
+  return { text: out, scaledCount, unscaledQtyCount };
 }
+
+// ── Timers & durations in step text ──────────────────────────────────────
+// Returns [{label, seconds, minutesMin, minutesMax}] for "3 hours", "45–60 minutes", "8-10 minutes per side"
+function detectTimers(text) {
+  if (!text) return [];
+  text = text.replace(/\bhalf an hour\b/gi, "30 minutes").replace(/\b(an|one) hour\b/gi, "1 hour").replace(/\b(two|2) hours\b/gi, "2 hours").replace(/\bthree hours\b/gi, "3 hours").replace(/\b(a|one) minute\b/gi, "1 minute").replace(/\b(two|three|four|five|ten|fifteen|twenty|thirty)\s+(minutes?|hours?)\b/gi, (m, w, u) => ({two:2,three:3,four:4,five:5,ten:10,fifteen:15,twenty:20,thirty:30})[w.toLowerCase()] + " " + u);
+  const re = /(\d+(?:\.\d+)?|\d+\s+\d\/\d|[½¼¾])(?:\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?|[½¼¾]))?\s*(hours?|hrs?|hr\.|minutes?|mins?|min\.|seconds?|secs?)\b/gi;
+  const out = []; let m;
+  while ((m = re.exec(text))) {
+    const a = cmNumValue(m[1]), b = m[2] ? cmNumValue(m[2]) : null;
+    if (a == null) continue;
+    const u = m[3].toLowerCase();
+    const mult = /^h/.test(u) ? 60 : /^s/.test(u) ? 1 / 60 : 1;
+    const minA = a * mult, minB = b != null ? b * mult : null;
+    if (minA <= 0) continue;
+    out.push({ label: m[0].trim(), minutesMin: minA, minutesMax: minB, seconds: Math.round(minA * 60) });
+  }
+  return out;
+}
+// Rough active/elapsed time of a step in minutes (for dinner-mode scheduling).
+// Uses the largest timer in the step; "overnight"/"4-24 hours" count as a hold
+// that we *don't* schedule (returns {minutes, isHold}).
+function stepDuration(text) {
+  const t = detectTimers(text);
+  if (/\b(overnight|refrigerate|marinate|chill|brine)\b/i.test(text) && t.some(x => x.minutesMin >= 120)) return { minutes: 0, isHold: true, holdLabel: t.map(x => x.label).join(" / ") };
+  if (!t.length) return { minutes: 3, isHold: false };
+  const mx = Math.max(...t.map(x => x.minutesMax != null ? x.minutesMax : x.minutesMin));
+  return { minutes: Math.max(1, mx), isHold: false };
+}
+const CM_JUNK_STEP = /^\s*(nutrition|keyword:.*|additional time.*|prep time.*|cook time.*|total time.*|servings?:?\s*\d*|ingredients?|instructions?|directions?|method|nesting bowls|notes?:?|equipment:?)\s*$/i;
+function isJunkStep(text) { return !text || CM_JUNK_STEP.test(text) || text.trim().length < 3; }
+// "Cube and season chicken: Mix ..." -> {title, body}
+function splitStepTitle(text) {
+  const m = (text || "").match(/^\s*(?:\d+\s+)?([A-Z][^.:!?]{2,48}?)([:.])\s+(?=[A-Z0-9(])(.+)$/s);
+  if (m) {
+    const words = m[1].trim().split(/\s+/).length;
+    const ok = m[2] === ":" ? words <= 7 : (words <= 4 && !/\b(add|pour|stir|cook|heat|place|remove|mix|whisk|toss)\b.*\b(the|a|an|in|to|with)\b/i.test(m[1]));
+    if (ok && !/\d\s*(°|degrees|minutes|hours)/i.test(m[1])) return { title: m[1].trim(), body: m[3].trim() };
+  }
+  return { title: "", body: (text || "").trim() };
+}
+
+// ── Building cook-mode step lists ────────────────────────────────────────
+function buildCookSteps(recipe, scale) {
+  const s = scale && scale > 0 ? scale : 1;
+  const parsedRows = Array.isArray(recipe.ingredientsParsed) && recipe.ingredientsParsed.length === (recipe.ingredients || []).length ? recipe.ingredientsParsed : null;
+  const ings = (recipe.ingredients || []).map((raw, i) => parseIngLine(typeof raw === "string" ? raw : String(raw || ""), parsedRows ? parsedRows[i] : null));
+  const scaled = ings.map(p => scaleIng(p, s));
+  const rawSteps = (recipe.steps || []).map(st => typeof st === "string" ? st : (st && (st.content || st.text || st.instruction)) || String(st || "")).filter(t => !isJunkStep(t));
+  const steps = rawSteps.map((text, i) => {
+    const matched = matchStepIngredients(text, ings);
+    const st = scaleStepText(text, s, ings, matched);
+    const { title, body } = splitStepTitle(st.text);
+    return {
+      num: i + 1, total: rawSteps.length, recipe: recipe.title || "", recipeId: recipe.id, photo: recipe.photo || null,
+      rawText: text, text: st.text, title, body, scaledInText: st.scaledCount, unscaledQtyInText: st.unscaledQtyCount,
+      needs: matched.map(m => ({ ...scaled[m.idx], idx: m.idx, strength: m.strength })),
+      timers: detectTimers(text), duration: stepDuration(text),
+    };
+  });
+  const effServings = recipe.servings ? Math.round(recipe.servings * s * 100) / 100 : null;
+  return { recipe, scale: s, servings: effServings, ingredients: scaled, steps };
+}
+
+// Dinner mode: schedule steps across recipes by "minutes before serving".
+// For each recipe, walk steps backwards summing durations so every step gets
+// a startsBefore (minutes before the dish is done). Hold steps (brine/overnight)
+// are flagged "do ahead" and listed first. Steps are then merged by startsBefore
+// descending, ties broken by recipe order (first-selected dish first).
+function buildDinnerPlan(items, recipes, colors) {
+  const sel = items.map(it => { const r = recipes.find(x => x.id === it.id); if (!r) return null; const scale = (it.servings && r.servings) ? it.servings / r.servings : 1; return { r, scale }; }).filter(Boolean);
+  const dishes = sel.map(({ r, scale }, di) => {
+    const built = buildCookSteps(r, scale);
+    let remaining = 0;
+    for (let i = built.steps.length - 1; i >= 0; i--) {
+      const st = built.steps[i];
+      st.color = colors ? colors[di % colors.length] : null; st.dishIndex = di;
+      if (st.duration.isHold) { st.startsBefore = Infinity; st.doAhead = st.duration.holdLabel; continue; }
+      remaining += st.duration.minutes;
+      st.startsBefore = remaining;
+    }
+    const totalMin = Math.max(...built.steps.filter(s => isFinite(s.startsBefore)).map(s => s.startsBefore), 0);
+    return { ...built, totalMinutes: totalMin, color: colors ? colors[di % colors.length] : null };
+  });
+  const all = [];
+  dishes.forEach(d => d.steps.forEach(st => all.push(st)));
+  all.sort((a, b) => (b.startsBefore - a.startsBefore) || (a.dishIndex - b.dishIndex) || (a.num - b.num));
+  // Normalize: the longest dish sets T=0 as "serve"; each step shows minutes before serve.
+  return { dishes, steps: all };
+}
+function fmtMinutes(min) {
+  if (!isFinite(min)) return "ahead of time";
+  if (min < 1) return "now";
+  if (min < 60) return Math.round(min) + " min";
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return m ? h + " h " + m + " min" : h + " h";
+}
+
 
 // ── Lightbox ──────────────────────────────────────────────────────────────
 function Lightbox({photos, startIndex, onClose}) {
@@ -1789,56 +2235,224 @@ function Lightbox({photos, startIndex, onClose}) {
   );
 }
 
-// ── Cook Mode ──────────────────────────────────────────────────────────────
-function CookModeOverlay({steps,currentIndex,onNav,onClose,isDinner}) {
-  const step = steps[currentIndex];
-  const wakeLockRef = useRef(null);
-  const [wakeLockActive, setWakeLockActive] = useState(false);
-  const [wakeLockSupported] = useState(()=>"wakeLock" in navigator);
-  useEffect(()=>{
-    async function acquire() { try { wakeLockRef.current = await navigator.wakeLock.request("screen"); setWakeLockActive(true); wakeLockRef.current.addEventListener("release",()=>setWakeLockActive(false)); } catch {} }
-    if(wakeLockSupported) acquire();
-    return ()=>{ wakeLockRef.current?.release(); };
-  },[wakeLockSupported]);
-  useEffect(()=>{
-    async function reacquire() { if(wakeLockSupported && document.visibilityState==="visible") { try { wakeLockRef.current = await navigator.wakeLock.request("screen"); setWakeLockActive(true); wakeLockRef.current.addEventListener("release",()=>setWakeLockActive(false)); } catch {} } }
-    document.addEventListener("visibilitychange",reacquire);
-    return ()=>document.removeEventListener("visibilitychange",reacquire);
-  },[wakeLockSupported]);
+// ── Cook Mode UI (proposed) ───────────────────────────────────────────────
+// Replaces CookModeOverlay and the .cook-* CSS. Depends on the core functions
+// above (buildCookSteps, buildDinnerPlan, fmtMinutes) and on React hooks
+// (useState/useEffect/useRef/useMemo already destructured in index.html).
 
+const COOK_STYLES = `
+  .cook-mode-overlay { position: fixed; inset: 0; background: #17140f; color: #f4ecdc; z-index: 100; display: flex; flex-direction: column; font-family: 'Lato', sans-serif; }
+  .cook-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .cook-header-main { flex: 1; min-width: 0; }
+  .cook-recipe-name { font-family: 'Playfair Display', serif; font-size: 17px; color: var(--saffron-light); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cook-sub { font-size: 12px; opacity: 0.65; display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+  .cook-badge { border: 1px solid rgba(240,184,75,0.6); color: var(--saffron-light); border-radius: 10px; padding: 0 7px; font-weight: 700; font-size: 11px; }
+  .cook-close { background: none; border: none; color: rgba(255,255,255,0.6); font-size: 26px; padding: 4px 8px; cursor: pointer; line-height: 1; }
+  .cook-progressbar { height: 3px; background: rgba(255,255,255,0.1); }
+  .cook-progressbar > div { height: 100%; background: var(--saffron); transition: width 0.25s; }
+  .cook-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 18px 16px 24px; }
+  .cook-inner { max-width: 680px; margin: 0 auto; }
+  .cook-kicker { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6; }
+  .cook-kicker b { font-family: 'Special Elite', monospace; font-size: 15px; opacity: 1; color: var(--saffron-light); letter-spacing: 0; }
+  .cook-dish { font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; margin-bottom: 6px; }
+  .cook-when { font-size: 12px; opacity: 0.7; margin-bottom: 8px; }
+  .cook-step-title { font-family: 'Playfair Display', serif; font-size: clamp(20px, 5vw, 26px); color: var(--saffron-light); margin: 0 0 8px; line-height: 1.25; }
+  .cook-step-text { font-size: clamp(21px, 4.6vw, 28px); line-height: 1.45; text-align: left; }
+  .cook-step-text mark { background: none; color: var(--saffron-light); font-weight: 700; border-bottom: 2px solid var(--saffron); }
+  .cook-scale-note { margin-top: 12px; font-size: 13px; opacity: 0.6; }
+  .cook-needs { margin-top: 22px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 12px; }
+  .cook-needs-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.55; margin-bottom: 6px; }
+  .cook-need { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); cursor: pointer; user-select: none; }
+  .cook-need.done { opacity: 0.35; text-decoration: line-through; }
+  .cook-need-amt { font-family: 'Special Elite', monospace; font-size: 19px; color: var(--saffron-light); min-width: 84px; text-align: right; flex-shrink: 0; }
+  .cook-need-amt.none { opacity: 0.35; }
+  .cook-need-name { font-size: 18px; line-height: 1.3; }
+  .cook-need-prep { font-size: 13px; opacity: 0.6; margin-left: 6px; }
+  .cook-need.mention .cook-need-name { opacity: 0.75; }
+  .cook-timers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .cook-timer-btn { background: rgba(240,184,75,0.12); border: 1px solid rgba(240,184,75,0.5); color: var(--saffron-light); border-radius: 20px; padding: 8px 14px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .cook-timer-live { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; background: #2a2418; border: 1px solid rgba(240,184,75,0.5); border-radius: 10px; padding: 8px 12px; margin-bottom: 14px; }
+  .cook-timer-live.over { background: #5a2a1e; animation: cookPulse 1s infinite; }
+  .cook-timer-clock { font-family: 'Special Elite', monospace; font-size: 26px; color: var(--saffron-light); min-width: 90px; }
+  .cook-timer-live button { background: none; border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  @keyframes cookPulse { 50% { border-color: #fff; } }
+  .cook-check { display: grid; gap: 4px; }
+  .cook-check-h { font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.55; margin: 14px 0 4px; }
+  .cook-plan { margin-top: 18px; display: grid; gap: 10px; }
+  .cook-plan-dish { border-left: 4px solid; padding: 6px 10px; background: rgba(255,255,255,0.04); border-radius: 0 8px 8px 0; }
+  .cook-plan-dish b { display: block; font-size: 16px; }
+  .cook-plan-dish span { font-size: 13px; opacity: 0.7; }
+  .cook-nav { display: flex; gap: 10px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(255,255,255,0.1); background: #17140f; }
+  .cook-nav-btn { flex: 1; min-height: 56px; font-family: 'Lato', sans-serif; font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; border-radius: 8px; cursor: pointer; border: 2px solid; }
+  .cook-prev { flex: 0.6; background: none; border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.7); }
+  .cook-next { background: var(--saffron); border-color: var(--saffron); color: #fff; }
+  .cook-photo-hero { width: 100%; max-height: 180px; object-fit: cover; border-radius: 10px; margin-bottom: 14px; }
+`;
+
+function useWakeLock() {
+  const ref = useRef(null);
+  const [active, setActive] = useState(false);
+  const supported = typeof navigator !== "undefined" && "wakeLock" in navigator;
+  useEffect(() => {
+    if (!supported) return;
+    let cancelled = false;
+    async function acquire() { try { ref.current = await navigator.wakeLock.request("screen"); if (cancelled) { ref.current.release(); return; } setActive(true); ref.current.addEventListener("release", () => setActive(false)); } catch {} }
+    acquire();
+    const onVis = () => { if (document.visibilityState === "visible") acquire(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", onVis); ref.current?.release(); };
+  }, [supported]);
+  return { supported, active };
+}
+
+function CookTimer({ timer, onDone, onClear }) {
+  const [left, setLeft] = useState(timer.seconds);
+  useEffect(() => { setLeft(timer.seconds); }, [timer]);
+  useEffect(() => {
+    const id = setInterval(() => setLeft(l => l - 1), 1000);
+    return () => clearInterval(id);
+  }, [timer]);
+  useEffect(() => {
+    if (left === 0) { onDone && onDone(); try { navigator.vibrate && navigator.vibrate([300, 150, 300, 150, 600]); } catch {} try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(); o.frequency.value = 880; o.connect(ctx.destination); o.start(); setTimeout(() => { o.stop(); ctx.close(); }, 900); } catch {} }
+  }, [left]);
+  const over = left <= 0;
+  const abs = Math.abs(left);
+  const mm = Math.floor(abs / 60), ss = abs % 60;
   return (
-    <div className="cook-mode-overlay">
-      <div className="cook-header">
-        <div><div className="cook-title">{isDinner?"Dinner Cook Mode":"Cook Mode"}</div><div className="cook-recipe-name">{step.recipe}{step.servings ? <span style={{fontSize:14,opacity:0.7,marginLeft:8}}>· {step.servings} servings</span> : null}</div></div>
-        <div style={{display:'flex',alignItems:'center',gap:16}}>
-          {wakeLockSupported && <div style={{fontSize:16,opacity:wakeLockActive?1:0.35}}>{wakeLockActive?"☀️":"🌑"}</div>}
-          <div className="cook-progress">{steps.map((_,i)=><div key={i} className={`cook-dot${i<currentIndex?" done":i===currentIndex?" current":""}`}/>)}</div>
-          <button className="btn-icon" style={{color:'rgba(255,255,255,0.5)',fontSize:24}} onClick={onClose}>✕</button>
-        </div>
+    <div className={"cook-timer-live" + (over ? " over" : "")}>
+      <div className="cook-timer-clock">{over ? "-" : ""}{mm}:{String(ss).padStart(2, "0")}</div>
+      <div style={{ flex: 1, fontSize: 13, opacity: 0.8 }}>{over ? "Time's up — " : ""}{timer.label}{timer.dish ? " · " + timer.dish : ""}</div>
+      <button onClick={onClear}>{over ? "OK" : "Cancel"}</button>
+    </div>
+  );
+}
+
+// Render step text with ‹scaled› markers as <mark>
+function CookText({ text }) {
+  const parts = String(text || "").split(/(‹[^›]*›)/g);
+  return <div className="cook-step-text">{parts.map((p, i) => p.startsWith("‹") ? <mark key={i}>{p.slice(1, -1)}</mark> : <React.Fragment key={i}>{p}</React.Fragment>)}</div>;
+}
+
+// plan = buildCookSteps(...) (single) or buildDinnerPlan(...) (dinner, isDinner=true)
+function CookModeOverlay({ plan, isDinner, onClose }) {
+  const steps = plan.steps;
+  const [idx, setIdx] = useState(0);            // 0 = "Before you start", 1..n = steps
+  const [checked, setChecked] = useState({});   // "i:j" -> true
+  const [timer, setTimer] = useState(null);
+  const wake = useWakeLock();
+  const bodyRef = useRef(null);
+  const touch = useRef(null);
+  const total = steps.length;
+  const step = idx > 0 ? steps[idx - 1] : null;
+  const scale = isDinner ? null : plan.scale;
+  const scaled = isDinner ? plan.dishes.some(d => d.scale !== 1) : plan.scale !== 1;
+  const go = d => setIdx(i => Math.max(0, Math.min(total, i + d)));
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [idx]);
+  useEffect(() => {
+    const onKey = e => { if (e.key === "ArrowRight" || e.key === " ") go(1); else if (e.key === "ArrowLeft") go(-1); else if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
+  }, [total]);
+  const onTouchStart = e => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+  const onTouchEnd = e => { if (!touch.current) return; const dx = e.changedTouches[0].clientX - touch.current.x, dy = e.changedTouches[0].clientY - touch.current.y; touch.current = null; if (Math.abs(dx) > 70 && Math.abs(dy) < 60) go(dx < 0 ? 1 : -1); };
+  const toggle = key => setChecked(c => ({ ...c, [key]: !c[key] }));
+
+  const headerName = isDinner ? (step ? step.recipe : plan.dishes.map(d => d.recipe.title).join(" + ")) : plan.recipe.title;
+  const servingsTxt = isDinner ? (step ? (plan.dishes[step.dishIndex].servings ? plan.dishes[step.dishIndex].servings + " servings" : "") : plan.dishes.length + " dishes") : (plan.servings ? plan.servings + " servings" : "");
+  const scaleTxt = isDinner ? (step && plan.dishes[step.dishIndex].scale !== 1 ? "×" + (Math.round(plan.dishes[step.dishIndex].scale * 100) / 100) : "") : (scale !== 1 ? "×" + (Math.round(scale * 100) / 100) : "");
+
+  function renderChecklist() {
+    const groups = isDinner ? plan.dishes.map(d => ({ title: d.recipe.title, color: d.color, ings: d.ingredients, key: d.recipe.id })) : [{ title: "", ings: plan.ingredients, key: "one" }];
+    return (
+      <div className="cook-inner">
+        {!isDinner && plan.recipe.photo && <img src={plan.recipe.photo} alt="" className="cook-photo-hero" />}
+        <div className="cook-kicker"><b>Before you start</b><span>{isDinner ? "everything, all dishes" : "everything you need"}</span></div>
+        {scaled && <div className="cook-scale-note">Scaled {isDinner ? "per dish" : scaleTxt + " to " + plan.servings + " servings"}. Amounts below are already adjusted; in the steps, <mark style={{ background: "none", color: "var(--saffron-light)", fontWeight: 700 }}>highlighted</mark> numbers are adjusted and every other number (times, temps, sizes) is as written.</div>}
+        {isDinner && (
+          <div className="cook-plan">
+            {plan.dishes.map((d, i) => (
+              <div key={d.recipe.id} className="cook-plan-dish" style={{ borderColor: d.color }}>
+                <b>{d.recipe.title}</b>
+                <span>{d.totalMinutes ? "about " + fmtMinutes(d.totalMinutes) + " start to finish" : ""}{d.steps.some(s => s.doAhead) ? " · has a do-ahead step (" + d.steps.filter(s => s.doAhead).map(s => s.doAhead).join(", ") + ")" : ""}</span>
+              </div>
+            ))}
+            <div className="cook-scale-note">Steps are ordered by how long before serving each one has to start, so the long cooks come first and the quick sides land at the end.</div>
+          </div>
+        )}
+        {groups.map(g => {
+          let section = null;
+          return (
+            <div key={g.key} className="cook-check">
+              {g.title && <div className="cook-dish" style={{ color: g.color, marginTop: 16 }}>{g.title}</div>}
+              {g.ings.map((ing, j) => {
+                if (ing.header) { section = ing.item; return <div key={j} className="cook-check-h">{ing.item}</div>; }
+                const key = g.key + ":" + j;
+                return (
+                  <div key={j} className={"cook-need" + (checked[key] ? " done" : "")} onClick={() => toggle(key)}>
+                    <div className={"cook-need-amt" + (ing.amount ? "" : " none")}>{ing.amount || "—"}</div>
+                    <div className="cook-need-name">{ing.amount ? (ing.sizeNote ? (/^(large|medium|small|whole)$/i.test(ing.sizeNote) ? ing.sizeNote + " " : "(" + ing.sizeNote + ") ") : "") + ing.item : ing.raw}{ing.prep && ing.amount ? <span className="cook-need-prep">{ing.prep}</span> : null}</div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
-      <div className="cook-body">
-        {step.photo && <img src={step.photo} alt={step.recipe} className="cook-photo" />}
-        <div className="cook-step-num">{step.num||(currentIndex+1)}</div>
-        {isDinner && <div className="cook-recipe-label" style={{color:step.color||'var(--saffron)'}}>{step.recipe}</div>}
-        <div className="cook-step-text">{step.text}</div>
-        {step.matchedIngs && step.matchedIngs.length > 0 && (
-          <div className="cook-ingredients">
-            {step.matchedIngs.map((ing,i) => {
-              const {amount, name} = parseIngAmount(ing);
+    );
+  }
+
+  function renderStep() {
+    const needs = step.needs.filter(n => n.strength >= 1);
+    const dish = isDinner ? plan.dishes[step.dishIndex] : null;
+    return (
+      <div className="cook-inner">
+        {timer && <CookTimer timer={timer} onClear={() => setTimer(null)} />}
+        <div className="cook-kicker"><b>Step {step.num}</b><span>of {step.total}</span></div>
+        {isDinner && <div className="cook-dish" style={{ color: step.color }}>{step.recipe}</div>}
+        {isDinner && (step.doAhead ? <div className="cook-when">Do ahead · {step.doAhead}</div> : isFinite(step.startsBefore) ? <div className="cook-when">Start about {fmtMinutes(step.startsBefore)} before serving</div> : null)}
+        {step.title && <h2 className="cook-step-title">{step.title}</h2>}
+        <CookText text={step.body} />
+        {step.timers.length > 0 && (
+          <div className="cook-timers">
+            {step.timers.map((t, i) => <button key={i} className="cook-timer-btn" onClick={() => setTimer({ ...t, dish: isDinner ? step.recipe : "", id: Date.now() })}>⏱ {t.label}</button>)}
+          </div>
+        )}
+        {needs.length > 0 && (
+          <div className="cook-needs">
+            <div className="cook-needs-title">For this step</div>
+            {needs.map(n => {
+              const key = (dish ? dish.recipe.id : "one") + ":" + n.idx;
               return (
-                <div key={i} className="cook-ing-chip">
-                  {amount && <span className="cook-ing-amount">{amount}</span>}
-                  <span className="cook-ing-name">{name}</span>
+                <div key={n.idx} className={"cook-need" + (n.strength < 2 ? " mention" : "") + (checked[key] ? " done" : "")} onClick={() => toggle(key)}>
+                  <div className={"cook-need-amt" + (n.amount ? "" : " none")}>{n.amount || "—"}</div>
+                  <div className="cook-need-name">{n.item}{n.prep ? <span className="cook-need-prep">{n.prep}</span> : null}</div>
                 </div>
               );
             })}
           </div>
         )}
+        {scaled && step.unscaledQtyInText > 0 && step.scaledInText === 0 && <div className="cook-scale-note">Amounts in this step are as written for the original recipe — check the list above for scaled amounts.</div>}
+        {scaled && step.perServing && <div className="cook-scale-note">Per-serving amounts — these don't change when you scale the batch.</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cook-mode-overlay" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="cook-header">
+        <div className="cook-header-main">
+          <div className="cook-recipe-name">{headerName}</div>
+          <div className="cook-sub">{isDinner ? "Dinner cook mode" : "Cook mode"}{servingsTxt ? <span>· {servingsTxt}</span> : null}{scaleTxt ? <span className="cook-badge">{scaleTxt}</span> : null}<span>· {idx} / {total}</span></div>
+        </div>
+        {wake.supported && <span title={wake.active ? "Screen will stay on" : "Screen may sleep"} style={{ opacity: wake.active ? 1 : 0.35 }}>☀️</span>}
+        <button className="cook-close" onClick={onClose} aria-label="Close">✕</button>
+      </div>
+      <div className="cook-progressbar"><div style={{ width: (100 * idx / total) + "%" }} /></div>
+      <div className="cook-body" ref={bodyRef}>
+        {step ? renderStep() : renderChecklist()}
       </div>
       <div className="cook-nav">
-        <button className="cook-nav-btn cook-prev" onClick={()=>onNav(-1)} style={{opacity:currentIndex===0?0.3:1}}>← Prev</button>
-        <span style={{color:'rgba(255,255,255,0.4)',fontSize:13}}>{currentIndex+1} / {steps.length}</span>
-        {currentIndex<steps.length-1 ? <button className="cook-nav-btn cook-next" onClick={()=>onNav(1)}>Next →</button> : <button className="cook-nav-btn cook-next" onClick={onClose}>Done ✓</button>}
+        <button className="cook-nav-btn cook-prev" onClick={() => go(-1)} style={{ opacity: idx === 0 ? 0.35 : 1 }}>← Back</button>
+        {idx < total ? <button className="cook-nav-btn cook-next" onClick={() => go(1)}>{idx === 0 ? "Start cooking →" : "Next →"}</button> : <button className="cook-nav-btn cook-next" onClick={onClose}>Done ✓</button>}
       </div>
     </div>
   );
@@ -1860,10 +2474,10 @@ function DinnerTab({recipes,selection,setSelection,onStartCook}) {
   const allCats = [...new Set(recipes.flatMap(r=>r.categories||[]))];
 
   function buildPreview(sel) {
-    const colorMap={}; sel.forEach((r,i)=>{colorMap[r.id]=COLORS[i%COLORS.length];});
-    const steps=[]; sel.forEach(r=>{r.steps.forEach((text,idx)=>steps.push({text,recipe:r.title,recipeId:r.id,color:colorMap[r.id],stepNum:idx+1,globalOrder:idx/r.steps.length}));});
-    steps.sort((a,b)=>a.globalOrder-b.globalOrder||sel.findIndex(r=>r.id===a.recipeId)-sel.findIndex(r=>r.id===b.recipeId));
-    return steps;
+    return buildDinnerPlan(sel.map(r => ({ id: r.id })), recipes, COLORS).steps.map(s => ({
+      text: (s.doAhead ? "Do ahead (" + s.doAhead + "): " : (isFinite(s.startsBefore) ? "T-" + fmtMinutes(s.startsBefore) + " · " : "")) + s.rawText,
+      recipe: s.recipe, recipeId: s.recipeId, color: s.color, stepNum: s.num,
+    }));
   }
 
   return (
