@@ -1287,7 +1287,8 @@ function RecipeBook() {
           }
           upsertRecipe(r); setEditRecipe(r); setTab("library");
         }} />}
-        {tab==="saleweek" && <SaleWeekPlanner recipes={recipes} onPlanned={n=>{
+        {tab==="saleweek" && <OnSaleThisWeek />}
+        {tab==="saleweek" && <SaleWeekPlanner recipes={recipes} onAddedOne={()=>setCalVersion(v=>v+1)} onPlanned={n=>{
           setCalVersion(v=>v+1);
           window.alert(`Added ${n} dinner${n===1?"":"s"} to the calendar. The Shopping tab will pick them up.`);
           setTab("calendar");
@@ -3612,6 +3613,7 @@ const VERDICT_MARK = {
   "strong":                   { icon: "\u2705", color: "var(--sage)" },
   "looks good (thin history)":{ icon: "\ud83d\udc4d", color: "var(--saffron)" },
   "skip":                     { icon: "\u274c", color: "var(--rust)" },
+  "on sale \u2014 you buy this": { icon: "\ud83d\uded2", color: "var(--saffron)" },
 };
 
 // --- Cook tonight ---------------------------------------------------------
@@ -3705,16 +3707,12 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
   }
 
   async function planTonight(recipeId) {
-    const iso = new Date().toISOString().slice(0,10);
+    // Local date, not UTC: after 7pm Central, toISOString() is already tomorrow.
+    const d = new Date();
+    const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
-        method: "POST",
-        headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify([{ date: iso, slot: "dinner", recipe_id: recipeId,
-                                servings: 4, leftover: false,
-                                updated_at: new Date().toISOString() }])
-      });
-      if (!res.ok) throw new Error(await res.text());
+      const r = byId[recipeId];
+      await addDinnersToCalendar([{ date: iso, recipe_id: recipeId, servings: (r && r.servings) || 4 }]);
       setNote("Added to tonight's dinner.");
       if (onPlanned) onPlanned();
     } catch (err) {
@@ -3826,6 +3824,177 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
   );
 }
 
+// --- On sale this week ----------------------------------------------------
+// Everything the household watches that is on sale right now - recipe
+// ingredients AND things bought regularly that no recipe mentions (frozen
+// pizza, berries, dog treats). Before this, a sale only showed up if the item
+// was already on the shopping list or in a planned recipe, so "Tombstone is on
+// sale" had nowhere to appear.
+//
+// Reads `watch_deals`: net price after any coupon, plus the verdict against
+// what the household usually pays. Grouped by how good the deal is. Items
+// priced ABOVE the usual are left out - that is not a sale worth a line.
+// Berries are watched in 'ad' mode: their packs don't compare cleanly by
+// size, so they are just flagged as on sale.
+
+function OnSaleThisWeek() {
+  const [rows, setRows] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/watch_deals?select=name,store,item,price_cents,net_price_cents,coupon_cents,coupon_title,valid_to,verdict,pct_below_usual,rank&rank=lt.9&order=rank.asc,name.asc,net_price_cents.asc`,
+          { headers: sbHeaders() }
+        );
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!cancelled) setRows(data || []);
+      } catch (err) {
+        console.warn("[on-sale] load failed:", err);
+        if (!cancelled) setRows([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!rows || !rows.length) return null;
+
+  // One ad often covers several watched items ("Blueberries, Raspberries or
+  // Blackberries") - show it once, listing every name it covers.
+  const grouped = [];
+  const byKey = {};
+  rows.forEach(r => {
+    const k = r.store + "|" + r.item + "|" + r.rank;
+    if (!byKey[k]) { byKey[k] = { ...r, names: [] }; grouped.push(byKey[k]); }
+    if (!byKey[k].names.includes(r.name)) byKey[k].names.push(r.name);
+  });
+
+  const good   = grouped.filter(r => r.rank <= 2);
+  const youBuy = grouped.filter(r => r.rank === 3);
+  const other  = grouped.filter(r => r.rank >= 4);
+
+  const money = c => c == null ? "" : "$" + (c / 100).toFixed(2);
+  const thru = d => {
+    if (!d) return "";
+    const x = new Date(d + "T00:00:00");
+    return isNaN(x) ? "" : " · thru " + x.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+  };
+
+  function Line({ r }) {
+    const mark = VERDICT_MARK[r.verdict];
+    return (
+      <div style={{padding:"7px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 180px",minWidth:0}}>
+            <span style={{fontWeight:700,textTransform:"capitalize"}}>
+              {mark ? mark.icon + " " : ""}{r.names.join(", ")}
+            </span>
+            <span className="text-muted" style={{fontSize:12}}> · {r.store}</span>
+          </div>
+          <div style={{fontWeight:700,whiteSpace:"nowrap"}}>
+            {money(r.net_price_cents)}
+            {r.coupon_cents > 0 && (
+              <span style={{fontWeight:400,fontSize:12,color:"var(--sage)"}}> after coupon</span>
+            )}
+          </div>
+        </div>
+        <div className="text-muted" style={{fontSize:12,marginTop:2,overflowWrap:"anywhere"}}>
+          {r.item}{thru(r.valid_to)}
+          {r.pct_below_usual > 0 && (
+            <span style={{color:"var(--sage)",fontWeight:600}}> · {r.pct_below_usual}% under what you usually pay</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function Group({ title, list }) {
+    if (!list.length) return null;
+    return (
+      <div style={{marginTop:10}}>
+        <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:1.5,
+                     color:"var(--ink-light)",fontFamily:"'Special Elite',monospace"}}>{title}</div>
+        {list.map((r, i) => <Line key={title + i} r={r} />)}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{marginBottom:24,padding:"12px 14px",background:"var(--parchment-dark)",borderRadius:6}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:"pointer"}}
+           onClick={() => setOpen(o => !o)}>
+        <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700}}>
+          🛒 On sale this week — things you buy
+        </div>
+        <span className="text-muted" style={{fontSize:12,whiteSpace:"nowrap"}}>
+          {good.length + youBuy.length} worth a look {open ? "▲" : "▼"}
+        </span>
+      </div>
+      {open && (
+        <div>
+          <Group title="Good deals" list={good} />
+          <Group title="On sale — you buy these" list={youBuy} />
+          {other.length > 0 && (
+            showAll
+              ? <Group title="Also on sale (no clear verdict)" list={other} />
+              : <button className="btn btn-outline btn-sm" style={{marginTop:10}}
+                        onClick={e => { e.stopPropagation(); setShowAll(true); }}>
+                  Show {other.length} more on sale
+                </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Add dinners exactly the way the Calendar tab does: browser storage first -
+// that is what the Calendar tab and the shopping list actually read - then
+// sync only the touched dates to Supabase.
+//
+// Sale Week and Cook Tonight used to POST straight to the Supabase calendar
+// table. Those rows only reached this device's calendar on the next app
+// start, so right after "Looks good" the Calendar tab and shopping list
+// looked as if nothing had been added.
+//
+// servings defaults to the recipe's own count, i.e. one full batch. The
+// shopping list scales by servings / recipe.servings, so a hard-coded 4 on a
+// 12-serving recipe quietly shopped for a third of it.
+async function addDinnersToCalendar(entries) {
+  const cal = loadCalendar();
+  const touched = {};
+  let added = 0;
+  for (const e of entries) {
+    if (!e || !e.date || !e.recipe_id) continue;
+    const day = cal[e.date] || (cal[e.date] = {});
+    const cur = day.dinner;
+    const arr = Array.isArray(cur) ? cur : (cur && cur.id ? [cur] : []);
+    if (!arr.some(x => x && x.id === e.recipe_id)) {
+      arr.push({ id: e.recipe_id, servings: e.servings || 4, leftover: false });
+      added++;
+    }
+    day.dinner = arr;
+    touched[e.date] = day;
+  }
+  saveCalendar(cal);
+  const prefs = loadSyncPrefs();
+  if (prefs.enabled && Object.keys(touched).length) {
+    await syncToSupabase([], [], touched);
+  }
+  return added;
+}
+
+// Recipe ids already planned for dinner on a date, from the same storage.
+function dinnersOn(date) {
+  const cur = (loadCalendar()[date] || {}).dinner;
+  const arr = Array.isArray(cur) ? cur : (cur && cur.id ? [cur] : []);
+  return arr.map(x => x && x.id).filter(Boolean);
+}
+
 // --- Plan the week around what's on sale ----------------------------------
 // A proposal, not a report. A list of deals leaves the thinking to you; a
 // proposed week leaves you approving or swapping. That difference is what
@@ -3834,14 +4003,26 @@ function CookTonight({ recipes, onOpen, onCook, onPlanned }) {
 // Available any day. Ads refresh daily and flip on Wednesday (Target Sunday),
 // so planning Thursday night is fine — it just proposes a week from Thursday.
 
-function SaleWeekPlanner({ recipes, onPlanned }) {
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0,10));
+function SaleWeekPlanner({ recipes, onPlanned, onAddedOne }) {
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  });
   const [nights, setNights] = useState(5);
   const [candidates, setCandidates] = useState(null);
   const [plan, setPlan] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [seed, setSeed] = useState(0);
+  // recipe_id -> date it was added on, so a row can say "Added" and "Add the
+  // rest" can skip it. dateFor holds a night the user picked for a row.
+  const [added, setAdded] = useState({});
+  const [dateFor, setDateFor] = useState({});
+  const [calTick, setCalTick] = useState(0);
+
+  const recipeById = useMemo(() => {
+    const m = {}; (recipes || []).forEach(r => { m[r.id] = r; }); return m;
+  }, [recipes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3903,21 +4084,42 @@ function SaleWeekPlanner({ recipes, onPlanned }) {
 
   function removeRow(idx) { setPlan(prev => prev.filter((_,i) => i!==idx)); }
 
+  const labelFor = iso => {
+    const d = new Date(iso + "T00:00:00");
+    return isNaN(d) ? iso : d.toLocaleDateString(undefined,{weekday:"short", month:"numeric", day:"numeric"});
+  };
+  // The night a row is planned for: the one the user picked, else the next
+  // night in sequence from the start date.
+  const rowDay = (p, i) => {
+    const iso = dateFor[p.recipe_id] || dayLabel(i).iso;
+    return { iso, label: labelFor(iso) };
+  };
+  const entryFor = (p, i) => ({
+    date: rowDay(p, i).iso,
+    recipe_id: p.recipe_id,
+    servings: (recipeById[p.recipe_id] && recipeById[p.recipe_id].servings) || 4,
+  });
+
+  async function addOne(p, i) {
+    setError("");
+    try {
+      const e = entryFor(p, i);
+      await addDinnersToCalendar([e]);
+      setAdded(a => ({ ...a, [p.recipe_id]: e.date }));
+      setCalTick(t => t + 1);
+      if (onAddedOne) onAddedOne();
+    } catch (err) {
+      setError("Couldn't add that dinner: " + err.message);
+    }
+  }
+
   async function accept() {
     setSaving(true); setError("");
     try {
-      const rows = plan.map((p,i) => ({
-        date: dayLabel(i).iso, slot: "dinner",
-        recipe_id: p.recipe_id, servings: 4, leftover: false,
-        updated_at: new Date().toISOString()
-      }));
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
-        method: "POST",
-        headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify(rows)
-      });
-      if (!res.ok) throw new Error(await res.text());
-      if (onPlanned) onPlanned(rows.length);
+      const rest = plan.map((p, i) => ({ p, i })).filter(x => !added[x.p.recipe_id]);
+      if (!rest.length) { if (onPlanned) onPlanned(0); return; }
+      const n = await addDinnersToCalendar(rest.map(x => entryFor(x.p, x.i)));
+      if (onPlanned) onPlanned(n);
     } catch (err) {
       setError("Couldn't save the plan: " + err.message);
     } finally { setSaving(false); }
@@ -3971,17 +4173,38 @@ function SaleWeekPlanner({ recipes, onPlanned }) {
       {error && <div style={{color:"var(--chili,#b3402f)",marginBottom:10,fontSize:13}}>{error}</div>}
 
       {plan.map((p, i) => {
-        const day = dayLabel(i);
+        const day = rowDay(p, i);
         const expiring = expiringBefore(p.deals, day.iso);
+        const isAdded = !!added[p.recipe_id];
+        // Other dinners already on the calendar that night. calTick makes this
+        // re-read after an add.
+        const already = calTick >= 0
+          ? dinnersOn(day.iso).filter(id => id !== p.recipe_id)
+              .map(id => (recipeById[id] && recipeById[id].title) || "a dinner")
+          : [];
         return (
           <div key={p.recipe_id+"-"+i}
                style={{padding:"12px 0",borderBottom:"1px dashed var(--parchment-dark)"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline"}}>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:11,textTransform:"uppercase",letterSpacing:1.5,
-                             color:"var(--ink-light)",fontFamily:"'Special Elite',monospace"}}>
-                  {day.label}
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,textTransform:"uppercase",letterSpacing:1.5,
+                               color:"var(--ink-light)",fontFamily:"'Special Elite',monospace"}}>
+                    {day.label}
+                  </span>
+                  {!isAdded && (
+                    <input type="date" className="filter-select" aria-label="Night for this dinner"
+                           style={{fontSize:11,padding:"1px 4px",maxWidth:140}}
+                           value={day.iso}
+                           onChange={e => { const v = e.target.value;
+                             if (v) setDateFor(d => ({ ...d, [p.recipe_id]: v })); }} />
+                  )}
                 </div>
+                {already.length > 0 && !isAdded && (
+                  <div style={{fontSize:11,color:"var(--rust)",marginTop:2}}>
+                    Already planned that night: {already.join(", ")}
+                  </div>
+                )}
                 <div style={{fontWeight:700,fontSize:16,marginTop:2}}>
                   {p.favorite && "⭐ "}{p.title}
                 </div>
@@ -4011,9 +4234,16 @@ function SaleWeekPlanner({ recipes, onPlanned }) {
                   </div>
                 )}
               </div>
-              <div style={{display:"flex",gap:6}}>
-                <button className="btn btn-outline btn-sm" onClick={()=>swap(i)}>Swap</button>
-                <button className="btn-icon" style={{color:"var(--rust)"}} onClick={()=>removeRow(i)}>✕</button>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                {isAdded ? (
+                  <span style={{fontSize:12,color:"var(--sage)",fontWeight:600,whiteSpace:"nowrap"}}>✓ Added</span>
+                ) : (
+                  <>
+                    <button className="btn btn-primary btn-sm" onClick={()=>addOne(p, i)}>📅 Add</button>
+                    <button className="btn btn-outline btn-sm" onClick={()=>swap(i)}>Swap</button>
+                    <button className="btn-icon" style={{color:"var(--rust)"}} onClick={()=>removeRow(i)}>✕</button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -4021,13 +4251,23 @@ function SaleWeekPlanner({ recipes, onPlanned }) {
       })}
 
       <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:18,alignItems:"center"}}>
-        <span className="text-muted" style={{fontSize:12,marginRight:"auto"}}>
-          Adds {plan.length} dinner{plan.length===1?"":"s"} to the calendar. The shopping list
-          builds itself from there.
-        </span>
-        <button className="btn btn-primary" disabled={saving||!plan.length} onClick={accept}>
-          {saving ? "Saving…" : "Looks good"}
-        </button>
+        {(() => {
+          const left = plan.filter(p => !added[p.recipe_id]).length;
+          const some = plan.length - left;
+          return (
+            <>
+              <span className="text-muted" style={{fontSize:12,marginRight:"auto"}}>
+                {some > 0
+                  ? `${some} added. ${left ? `Add the other ${left} too, or leave them.` : "All set."}`
+                  : `Add dinners one at a time, or all ${plan.length} at once.`} The shopping
+                list builds itself from the calendar.
+              </span>
+              <button className="btn btn-primary" disabled={saving || !left} onClick={accept}>
+                {saving ? "Saving…" : some > 0 ? `Add the rest (${left})` : `Add all ${plan.length}`}
+              </button>
+            </>
+          );
+        })()}
       </div>
     </div>
   );
