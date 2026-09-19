@@ -558,37 +558,65 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
     await sbUpsert("pantry", rows);
   }
   if (calendarData && typeof calendarData === "object") {
-    const calRows = [];
+    // Upsert first, then prune. The old delete-then-insert wiped the cloud
+    // whenever the insert was rejected (e.g. servings 2.5 into an int column).
+    const byKey = new Map();
     const datesTouched = new Set();
     for (const [date, slots] of Object.entries(calendarData)) {
       datesTouched.add(date);
-      for (const [slot, entries] of Object.entries(slots)) {
+      for (const [slot, entries] of Object.entries(slots || {})) {
         const arr = Array.isArray(entries) ? entries : (entries && entries.id ? [entries] : []);
         for (const entry of arr) {
           if (entry && entry.id) {
-            calRows.push({ date, slot, recipe_id: entry.id, servings: entry.servings || 1, leftover: entry.leftover || false, updated_at: new Date().toISOString() });
+            const sv = Number(entry.servings);
+            byKey.set(`${date}|${slot}|${entry.id}`, { date, slot, recipe_id: entry.id, servings: (isFinite(sv) && sv > 0) ? sv : 1, leftover: !!entry.leftover, updated_at: new Date().toISOString() });
           }
         }
       }
     }
-    // Calendar supports multiple recipes per date+slot, so we replace per-date:
-    // delete all existing rows for each touched date, then insert the current set.
-    // This also correctly removes meals that were deleted in the app.
-    for (const date of datesTouched) {
-      await fetch(`${SUPABASE_URL}/rest/v1/calendar?date=eq.${date}`, { method: "DELETE", headers: sbHeaders() });
-    }
+    const calRows = [...byKey.values()];
+    const fail = async (res, what) => {
+      const t = await res.text().catch(()=>"");
+      const msg = `Calendar ${what} failed: ${res.status} ${t.slice(0,120)}`;
+      try { window.dispatchEvent(new CustomEvent("recipebook-sync-error", { detail: msg })); } catch {}
+      throw new Error(msg);
+    };
     if (calRows.length > 0) {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar`, {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar?on_conflict=date,slot,recipe_id`, {
         method: "POST",
-        headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+        headers: { ...sbHeaders(), "Prefer": "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(calRows)
       });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Calendar sync failed: ${res.status} ${t.slice(0,150)}`);
+      if (!res.ok) await fail(res, "save");
+    }
+    const dates = [...datesTouched];
+    for (let k = 0; k < dates.length; k += 40) {
+      const chunk = dates.slice(k, k + 40);
+      const q = chunk.map(d => `"${d}"`).join(",");
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar?select=id,date,slot,recipe_id&date=in.(${encodeURIComponent(q)})`, { headers: sbHeaders() });
+      if (!res.ok) await fail(res, "read");
+      const stale = (await res.json()).filter(r => !byKey.has(`${r.date}|${r.slot}|${r.recipe_id}`)).map(r => r.id);
+      if (stale.length) {
+        const del = await fetch(`${SUPABASE_URL}/rest/v1/calendar?id=in.(${stale.join(",")})`, { method: "DELETE", headers: sbHeaders() });
+        if (!del.ok) await fail(del, "cleanup");
       }
     }
   }
+}
+
+// Upcoming meals that exist on this device but not in the cloud (e.g. a save
+// that failed earlier) get pushed up after a cloud load, so devices converge.
+async function pushLocalOnlyUpcoming(localCal, cloudCal) {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const missing = {};
+  for (const [date, slots] of Object.entries(localCal || {})) {
+    if (date < today || (cloudCal && cloudCal[date])) continue;
+    const has = Object.values(slots || {}).some(e => Array.isArray(e) ? e.some(x => x && x.id) : (e && e.id));
+    if (has) missing[date] = slots;
+  }
+  if (Object.keys(missing).length) await syncToSupabase([], [], missing);
+  return Object.keys(missing).length;
 }
 
 async function loadFromSupabase() {
@@ -601,7 +629,7 @@ async function loadFromSupabase() {
   for (const row of calRows) {
     if (!calendar[row.date]) calendar[row.date] = {};
     if (!calendar[row.date][row.slot]) calendar[row.date][row.slot] = [];
-    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: row.servings, leftover: row.leftover });
+    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: Number(row.servings) || 1, leftover: !!row.leftover });
   }
   const ingredientSubs = {};
   (subRows||[]).forEach(r => { if (r && r.key && r.pantry_item_id) ingredientSubs[r.key] = r.pantry_item_id; });
@@ -942,6 +970,11 @@ function RecipeBook() {
   const [showGitHubSettings, setShowGitHubSettings] = useState(false);
   const [githubPrefs, setGitHubPrefs] = useState(()=>loadSyncPrefs());
   const [syncStatus, setSyncStatus] = useState(''); // '', 'syncing', 'ok', 'error'
+  useEffect(() => {
+    const h = e => setSyncStatus("error:" + (e.detail || "Sync failed"));
+    window.addEventListener("recipebook-sync-error", h);
+    return () => window.removeEventListener("recipebook-sync-error", h);
+  }, []);
   const githubReady = useRef(false); // true only after startup GitHub load completes
   const blockSave = useRef(false);
   const [pantryVersion, setPantryVersion] = useState(0);
@@ -994,7 +1027,7 @@ function RecipeBook() {
             localStorage.setItem(PANTRY_KEY, JSON.stringify(sbData.pantry));
             setPantryVersion(v=>v+1);
           }
-          if (sbData.calendar && Object.keys(sbData.calendar).length > 0) {
+          if (sbData.calendar) {
             // Merge rather than overwrite: cloud wins per-date where both exist,
             // but local-only dates not present in the cloud snapshot are kept.
             // Protects against exactly the bug that just bit Ed/Sue — a stale
@@ -1004,6 +1037,7 @@ function RecipeBook() {
             const merged = { ...localCal, ...sbData.calendar };
             localStorage.setItem(CAL_KEY, JSON.stringify(merged));
             setCalVersion(v=>v+1);
+            pushLocalOnlyUpcoming(localCal, sbData.calendar).catch(e=>console.warn("Calendar catch-up failed:", e));
           }
           if (sbData.ingredientSubs && Object.keys(sbData.ingredientSubs).length > 0) {
             saveIngredientSubs(sbData.ingredientSubs);
