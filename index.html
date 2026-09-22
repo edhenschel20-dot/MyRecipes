@@ -4219,7 +4219,9 @@ function formatPackageCount(count, label) {
 // plain scaled amount, exactly as before.
 function formatNeedQty(need, usePackages) {
   if (!need.hasAmount) return "";
-  const raw = `${formatAmount(need.totalAmount,1,need.unitKey)}${need.unitDisplay?" "+need.unitDisplay:""}`.trim();
+  let raw = `${formatAmount(need.totalAmount,1,need.unitKey)}${need.unitDisplay?" "+need.unitDisplay:""}`.trim();
+  // "2" for a canned good is useless in the aisle — say "2 \u00d7 14.5 oz".
+  if (need.sizeHint && !need.unitKey) raw = `${raw} \u00d7 ${need.sizeHint}`;
   if (!usePackages) return raw;
   const pkg = findPackageMatch(need.name);
   if (!pkg) return raw;
@@ -4244,6 +4246,19 @@ function formatNeedQty(need, usePackages) {
 // strips comma/paren content; descriptors with no comma or parens (like
 // "Black pepper" vs "White pepper") are left alone since those usually do
 // change what you buy.
+// Pulls "14.5 oz" out of "(14.5 oz) can crushed tomatoes" so the shopping
+// list can still say what size can to buy after the parens are stripped.
+function sizeHintFrom(name) {
+  const m = (name||"").match(/\(\s*(\d+(?:\.\d+)?)\s*-?\s*(fl\s*oz|oz|ounces?|lb|pounds?|kg|g|ml|liters?|l)\b[^)]*\)/i);
+  if (!m) return "";
+  let u = m[2].toLowerCase().replace(/\s+/g,"");
+  if (u.startsWith("ounce")) u = "oz";
+  else if (u.startsWith("pound")) u = "lb";
+  else if (u.startsWith("liter")) u = "L";
+  else if (u === "floz") u = "fl oz";
+  return `${m[1]} ${u}`;
+}
+
 function shoppingBaseName(name) {
   let s = (name||"").replace(/\([^)]*\)/g, "").trim();
   const commaIdx = s.indexOf(",");
@@ -6127,6 +6142,7 @@ function loadTripPrefs() {
 function TripPlan({ items, deals }) {
   const [prefs, setPrefs] = useState(loadTripPrefs);
   const [open, setOpen] = useState(true);
+  const [openStore, setOpenStore] = useState(null);
   const [stores, setStores] = useState([]);
 
   useEffect(() => {
@@ -6191,28 +6207,46 @@ function TripPlan({ items, deals }) {
 
       {open && (
         <div style={{marginTop:10}}>
+          <div style={{fontSize:11,color:"var(--ink-light)",marginBottom:6}}>
+            Tap a store to see which of your items are on sale there.
+          </div>
           {rows.map(r => (
-            <div key={r.store}
-                 style={{display:"flex",justifyContent:"space-between",gap:10,padding:"6px 0",
-                         borderBottom:"1px dotted var(--parchment-dark)",
-                         opacity: r.worth ? 1 : 0.55}}>
-              <div>
-                <span style={{fontWeight:600}}>{r.store}</span>
-                {r.isHome && <span className="text-muted" style={{fontSize:11}}> · home</span>}
-                {!r.isHome && r.drive != null &&
-                  <span className="text-muted" style={{fontSize:11}}> · +{r.drive} min</span>}
-                <div style={{fontSize:11,color:"var(--ink-light)"}}>
-                  {r.items.map(i=>i.name).join(", ")}
+            <div key={r.store} style={{borderBottom:"1px dotted var(--parchment-dark)",opacity: r.worth ? 1 : 0.55}}>
+              <div onClick={()=>setOpenStore(o=>o===r.store?null:r.store)}
+                   style={{display:"flex",justifyContent:"space-between",gap:10,padding:"6px 0",cursor:"pointer"}}>
+                <div>
+                  <span style={{fontWeight:600}}>{openStore===r.store?"▾ ":"▸ "}{r.store}</span>
+                  {r.isHome && <span className="text-muted" style={{fontSize:11}}> · home</span>}
+                  {!r.isHome && r.drive != null &&
+                    <span className="text-muted" style={{fontSize:11,whiteSpace:"nowrap"}}> · +{r.drive} min</span>}
+                  <div style={{fontSize:11,color:"var(--ink-light)"}}>
+                    {r.items.map(i=>i.name).join(", ")}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",whiteSpace:"nowrap",fontSize:12}}>
+                  <div style={{fontWeight:600}}>{r.items.length} item{r.items.length===1?"":"s"}</div>
+                  <div style={{color:"var(--ink-light)"}}>${r.value.toFixed(2)}</div>
+                  {!r.isHome && (
+                    <div style={{color: r.worth ? "var(--saffron)" : "var(--ink-light)"}}>
+                      {r.worth ? "worth the stop" : `skip — get at ${home}`}
+                    </div>
+                  )}
                 </div>
               </div>
-              <div style={{textAlign:"right",whiteSpace:"nowrap",fontSize:12}}>
-                <div style={{fontWeight:600}}>{r.items.length} item{r.items.length===1?"":"s"}</div>
-                {!r.isHome && (
-                  <div style={{color: r.worth ? "var(--saffron)" : "var(--ink-light)"}}>
-                    {r.worth ? "worth the stop" : `skip — get at ${home}`}
-                  </div>
-                )}
-              </div>
+              {openStore===r.store && (
+                <div style={{padding:"2px 0 8px 14px"}}>
+                  {r.items.map(i => (
+                    <div key={i.name} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12,padding:"3px 0"}}>
+                      <span>{i.name}</span>
+                      <span style={{whiteSpace:"nowrap",color:"var(--saffron)",fontWeight:600}}>
+                        {i.deal.price_cents != null ? "$"+(i.deal.price_cents/100).toFixed(2) : ""}
+                        {i.deal.unit_basis === "lb" ? "/lb" : ""}
+                        {i.deal.valid_to && <span style={{color:"var(--ink-light)",fontWeight:400}}> · thru {formatDealDate(i.deal.valid_to)}</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 
@@ -6536,8 +6570,9 @@ function getCalendarIngredientNeeds(calendar, recipes, startDate, endDate) {
           if (!cleanName) continue;
           const groupKey = normalizeWords(cleanName).join(" ") + "|" + (parsed.unitKey||"");
           if (!needs[groupKey]) {
-            needs[groupKey] = { name: cleanName, unitKey: parsed.unitKey, unitDisplay: parsed.unitDisplay, totalAmount: 0, hasAmount: false, byRecipe: new Map() };
+            needs[groupKey] = { name: cleanName, unitKey: parsed.unitKey, unitDisplay: parsed.unitDisplay, totalAmount: 0, hasAmount: false, byRecipe: new Map(), sizeHint: sizeHintFrom(parsed.name) };
           }
+          if (!needs[groupKey].sizeHint) needs[groupKey].sizeHint = sizeHintFrom(parsed.name);
           const scaledAmt = parsed.amount !== null ? parsed.amount * scale : null;
           if (scaledAmt !== null) {
             needs[groupKey].totalAmount += scaledAmt;
