@@ -7800,10 +7800,10 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
       {viewMode==="month"&&(
         <>
           {selectedDay&&<div id='day-panel' style={{marginBottom:12}}><DayPanel dk={selectedDay}/></div>}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",marginBottom:4}}>
             {DAY_NAMES.map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:"var(--ink-light)",padding:"4px 0",textTransform:"uppercase"}}>{d}</div>)}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:2,marginBottom:16}}>
             {Array(firstDay).fill(null).map((_,i)=><div key={"e"+i}/>)}
             {Array(daysInMonth).fill(null).map((_,i)=>{
               const day=i+1;
@@ -7818,7 +7818,7 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
                     if(!isSelected) setTimeout(()=>document.getElementById('day-panel')?.scrollIntoView({behavior:'smooth',block:'start'}),50);
                   }}
                   style={{border:isSelected?"2px solid var(--saffron)":isToday?"2px solid var(--ink)":"1px solid var(--parchment-dark)",
-                    borderRadius:6,padding:"6px 4px",minHeight:64,cursor:"pointer",
+                    borderRadius:6,padding:"6px 4px",minHeight:64,minWidth:0,overflow:"hidden",cursor:"pointer",
                     background:isSelected?"rgba(212,137,26,0.08)":isToday?"var(--parchment-dark)":"var(--cream)",
                     transition:"all 0.15s"}}>
                   <div style={{fontFamily:"'Special Elite',monospace",fontSize:13,fontWeight:isToday?700:400,textAlign:"center",
@@ -7850,7 +7850,7 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
       {viewMode==="week"&&(
         <div>
           {/* Week header row */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:4,marginBottom:12}}>
             {weekDays.map(dk=>{
               const d=new Date(dk+"T12:00:00");
               const isToday=dk===today_key;
