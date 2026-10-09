@@ -1593,7 +1593,7 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
           </ul>
 
           <div className="detail-section-title">Method</div>
-          <ol className="step-list">{safe.steps.map((step,i)=><li key={i}>{step}</li>)}</ol>
+          <ol className="step-list">{scaleRecipeSteps(safe, scale).map((st,i)=><li key={i}>{st.text.split(/(‹[^›]*›)/).map((part,j)=>part.charAt(0)==="‹" ? <mark key={j} style={{background:"rgba(234,170,0,0.25)",color:"inherit",padding:"0 3px",borderRadius:3,fontWeight:700}}>{part.slice(1,-1)}</mark> : part)}</li>)}</ol>
         </div>
       </div>
     </div>
@@ -2267,6 +2267,23 @@ function fmtMinutes(min) {
   return m ? h + " h " + m + " min" : h + " h";
 }
 
+
+// Recipe page: scale quantities inside the Method text to match the servings control.
+// Same rules as Cook Mode (scaleStepText); scaled numbers come back wrapped in ‹ ›.
+function scaleRecipeSteps(recipe, scale) {
+  const s = scale && scale > 0 ? scale : 1;
+  const steps = recipe.steps || [];
+  if (s === 1) return steps.map(text => ({ text, scaled: 0 }));
+  let ings = [];
+  try {
+    const parsedRows = Array.isArray(recipe.ingredientsParsed) && recipe.ingredientsParsed.length === (recipe.ingredients || []).length ? recipe.ingredientsParsed : null;
+    ings = (recipe.ingredients || []).map((raw, i) => parseIngLine(typeof raw === "string" ? raw : String(raw || ""), parsedRows ? parsedRows[i] : null));
+  } catch (e) { return steps.map(text => ({ text, scaled: 0 })); }
+  return steps.map(text => {
+    try { const st = scaleStepText(text, s, ings, matchStepIngredients(text, ings)); return { text: st.text, scaled: st.scaledCount }; }
+    catch (e) { return { text, scaled: 0 }; }
+  });
+}
 
 // ── Lightbox ──────────────────────────────────────────────────────────────
 function Lightbox({photos, startIndex, onClose}) {
