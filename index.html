@@ -594,6 +594,14 @@ async function migrateBase64Photo(dataUrl) {
   return null;
 }
 
+// Calendar rows this device has actually seen: everything in its last cloud
+// pull plus everything it has pushed since. Sync only deletes a cloud row
+// that is in this set, so a meal added elsewhere since the last pull (the
+// other phone, Alexa, Claude) is never erased by a device that hasn't seen it.
+const CAL_KNOWN_KEY = "recipebook_cal_known_v1";
+function loadCalKnown() { try { return new Set(JSON.parse(localStorage.getItem(CAL_KNOWN_KEY) || "[]")); } catch { return new Set(); } }
+function saveCalKnown(set) { try { localStorage.setItem(CAL_KNOWN_KEY, JSON.stringify([...set])); } catch {} }
+
 async function syncToSupabase(recipes, pantryItems, calendarData) {
   if (recipes && recipes.length > 0) {
     const migratedRecipes = await Promise.all(recipes.map(async r => {
@@ -660,6 +668,7 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
         body: JSON.stringify(calRows)
       });
       if (!res.ok) await fail(res, "save");
+      const known = loadCalKnown(); byKey.forEach((_, k) => known.add(k)); saveCalKnown(known);
     }
     const dates = [...datesTouched];
     for (let k = 0; k < dates.length; k += 40) {
@@ -667,10 +676,13 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
       const q = chunk.map(d => `"${d}"`).join(",");
       const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar?select=id,date,slot,recipe_id&date=in.(${encodeURIComponent(q)})`, { headers: sbHeaders() });
       if (!res.ok) await fail(res, "read");
-      const stale = (await res.json()).filter(r => !byKey.has(`${r.date}|${r.slot}|${r.recipe_id}`)).map(r => r.id);
+      const known = loadCalKnown();
+      const staleRows = (await res.json()).filter(r => { const k = `${r.date}|${r.slot}|${r.recipe_id}`; return !byKey.has(k) && known.has(k); });
+      const stale = staleRows.map(r => r.id);
       if (stale.length) {
         const del = await fetch(`${SUPABASE_URL}/rest/v1/calendar?id=in.(${stale.join(",")})`, { method: "DELETE", headers: sbHeaders() });
         if (!del.ok) await fail(del, "cleanup");
+        staleRows.forEach(r => known.delete(`${r.date}|${r.slot}|${r.recipe_id}`)); saveCalKnown(known);
       }
     }
   }
@@ -703,6 +715,7 @@ async function loadFromSupabase() {
     if (!calendar[row.date][row.slot]) calendar[row.date][row.slot] = [];
     calendar[row.date][row.slot].push({ id: row.recipe_id, servings: Number(row.servings) || 1, leftover: !!row.leftover });
   }
+  saveCalKnown(new Set(calRows.map(r => `${r.date}|${r.slot}|${r.recipe_id}`)));
   const ingredientSubs = {};
   (subRows||[]).forEach(r => { if (r && r.key && r.pantry_item_id) ingredientSubs[r.key] = r.pantry_item_id; });
   return { recipes, pantry, calendar, ingredientSubs };
