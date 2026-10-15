@@ -87,6 +87,7 @@ const STYLES = `
   .btn-outline { background: none; color: var(--ink); border-color: var(--ink); }
   .btn-outline:hover { background: var(--ink); color: var(--cream); }
   .btn-ghost { background: none; color: var(--ink-light); border-color: transparent; }
+  .rate-chip { padding: 6px 10px !important; font-size: 11px !important; border: 1px solid var(--ink-mid) !important; }
   .btn-ghost:hover { color: var(--ink); border-color: var(--parchment-dark); }
   .btn-danger { background: none; color: var(--rust); border-color: var(--rust); }
   .btn-danger:hover { background: var(--rust); color: white; }
@@ -471,6 +472,16 @@ function computeAutoStaples(cal) {
   const out = new Map();
   days.forEach((set, id) => { if (set.size >= 3) out.set(id, set.size); });
   return out;
+}
+// "We made this": which slot a meal logged right now belongs in.
+function slotForNow() {
+  const h = new Date().getHours() + new Date().getMinutes() / 60;
+  return h < 10.5 ? "breakfast" : h < 15 ? "lunch" : "dinner";
+}
+// Is this recipe already on today's calendar (any slot, not as leftovers)?
+function onTodaysCalendar(id) {
+  const day = loadCalendar()[todayKey()] || {};
+  return Object.values(day).some(v => (Array.isArray(v) ? v : [v]).some(e => e && !e.leftover && (e.id === id || e === id)));
 }
 function isStapleRecipe(r) { return !!(r && (r.staple || AUTO_STAPLE.has(r.id))); }
 
@@ -1264,6 +1275,21 @@ function RecipeBook() {
     }
   }
 
+  // Log meals as made today. Skips anything already on today's calendar, so
+  // cooking a planned meal never double-counts. Returns how many were added.
+  async function logMadeToday(items) {
+    const slot = slotForNow();
+    let added = 0;
+    for (const it of items || []) {
+      if (!it || !it.id || onTodaysCalendar(it.id)) continue;
+      const r = recipes.find(x => x.id === it.id);
+      const servings = it.servings || (r && r.servings) || 4;
+      await addToMealPlan(it.id, todayKey(), slot, servings, null, 0);
+      added++;
+    }
+    return added;
+  }
+
   AUTO_STAPLE = computeAutoStaples(loadCalendar());
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
@@ -1339,7 +1365,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onSetRating={setRating} onToggleStaple={toggleStaple} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onSetRating={setRating} onToggleStaple={toggleStaple} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} onMadeIt={logMadeToday} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
@@ -1387,8 +1413,8 @@ function RecipeBook() {
           }
           upsertRecipe(r); setShowAdd(false); setEditRecipe(null);
         }} onClose={()=>{setShowAdd(false);setEditRecipe(null);}} />}
-      {cookMode && <CookModeOverlay plan={cookMode} onClose={()=>setCookMode(null)} />}
-      {dinnerCookMode && <CookModeOverlay plan={dinnerCookMode} isDinner onClose={()=>setDinnerCookMode(null)} />}
+      {cookMode && <CookModeOverlay plan={cookMode} onMadeIt={()=>logMadeToday([{ id: cookMode.recipe && cookMode.recipe.id, servings: cookMode.servings }])} onClose={()=>setCookMode(null)} />}
+      {dinnerCookMode && <CookModeOverlay plan={dinnerCookMode} isDinner onMadeIt={()=>logMadeToday((dinnerCookMode.dishes||[]).map(d=>({ id: d.recipe && d.recipe.id, servings: d.servings })))} onClose={()=>setDinnerCookMode(null)} />}
       {showSync && <SyncModal data={data} onImport={imported=>{
         // Merge: add recipes not already present by id
         setData(d=>{
@@ -1411,7 +1437,7 @@ function RecipeBook() {
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onSetRating,onToggleStaple,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onSetRating,onToggleStaple,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan,onMadeIt}) {
   const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
@@ -1449,7 +1475,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <button className={`fav-filter-btn${hideQuickAdd?" active":""}`} title="Hide quick-add meals" onClick={()=>setHideQuickAdd(h=>!h)}>⚡️🚫</button>
       </div>
       {selectedRecipe ? (
-        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onSetRating={onSetRating} onToggleStaple={onToggleStaple} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} />
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onSetRating={onSetRating} onToggleStaple={onToggleStaple} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} onMadeIt={onMadeIt} />
       ) : recipes.length===0 ? (
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
@@ -1551,7 +1577,8 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
   );
 }
 
-function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRating,onToggleStaple,onQuickPhoto,onAddToPlan}) {
+function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRating,onToggleStaple,onQuickPhoto,onAddToPlan,onMadeIt}) {
+  const [madeTick, setMadeTick] = useState(0);
   const safe = normalizeRecipe({...recipe});
     const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
@@ -1565,10 +1592,6 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRati
       <div className="recipe-action-bar">
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>{window.history.back();}}>← Back</button>
         <div style={{flex:1}}/>
-        <StarRating value={recipeRating(safe)} onChange={n=>onSetRating(safe.id, n)} size={22} />
-        <button className="recipe-action-btn recipe-action-btn-edit"
-          title={AUTO_STAPLE.has(safe.id) && !safe.staple ? `Auto: on the calendar ${AUTO_STAPLE.get(safe.id)} days in the last 90. Tap to pin it as a staple.` : "Staple — something you make all the time"}
-          style={isStapleRecipe(safe)?{background:'var(--ink-mid)',color:'white'}:{}} onClick={()=>onToggleStaple(safe.id)}>🔁 {safe.staple?"Staple":AUTO_STAPLE.has(safe.id)?`Staple · ${AUTO_STAPLE.get(safe.id)}×`:"Staple?"}</button>
         <label className="recipe-action-btn recipe-action-btn-edit" style={{cursor:"pointer",display:"inline-flex",alignItems:"center"}} title="Add photo">
           <input type="file" accept="image/*" style={{width:"0.1px",height:"0.1px",opacity:0,position:"absolute",zIndex:-1}}
             onChange={async e=>{
@@ -1587,6 +1610,16 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRati
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>onAddToPlan(safe)}>📅 Plan</button>
         <button className="recipe-action-btn recipe-action-btn-cook" onClick={()=>onCook(safe, scale)}>▶ Cook</button>
         <button className="recipe-action-btn recipe-action-btn-danger" onClick={()=>onDelete(safe.id)}>🗑</button>
+      </div>
+      <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:8,padding:'10px 4px 4px'}}>
+          <StarRating value={recipeRating(safe)} onChange={n=>onSetRating(safe.id, n)} size={22} />
+          <button className="btn btn-ghost rate-chip"
+            title={AUTO_STAPLE.has(safe.id) && !safe.staple ? `Auto: on the calendar ${AUTO_STAPLE.get(safe.id)} days in the last 90. Tap to pin it as a staple.` : "Staple — something you make all the time"}
+            style={isStapleRecipe(safe)?{background:'var(--ink)',color:'white'}:{}} onClick={()=>onToggleStaple(safe.id)}>🔁 {safe.staple?"Staple":AUTO_STAPLE.has(safe.id)?`Staple · ${AUTO_STAPLE.get(safe.id)}×`:"Staple?"}</button>
+          {onMadeIt && (onTodaysCalendar(safe.id)
+            ? <span className="btn btn-ghost rate-chip" style={{background:'var(--ink)',color:'white',cursor:'default'}} title="On today's calendar">✓ Made today</span>
+            : <button className="btn btn-ghost rate-chip" title={`Log it on today's calendar (${slotForNow()})`}
+                onClick={async()=>{ await onMadeIt([{ id: safe.id, servings: safe.servings }]); setMadeTick(t=>t+1); }}>🍽 Made it</button>)}
       </div>
       <div className="detail-panel">
         <DetailHero safe={safe} onCook={()=>onCook(safe, scale)} onEdit={()=>onEdit(safe)} onDelete={()=>onDelete(safe.id)} onLightbox={onLightbox} />
@@ -2480,7 +2513,7 @@ function CookText({ text }) {
 }
 
 // plan = buildCookSteps(...) (single) or buildDinnerPlan(...) (dinner, isDinner=true)
-function CookModeOverlay({ plan, isDinner, onClose }) {
+function CookModeOverlay({ plan, isDinner, onClose, onMadeIt }) {
   const steps = plan.steps;
   const [idx, setIdx] = useState(0);            // 0 = "Before you start", 1..n = steps
   const [checked, setChecked] = useState({});   // "i:j" -> true
@@ -2598,7 +2631,7 @@ function CookModeOverlay({ plan, isDinner, onClose }) {
       </div>
       <div className="cook-nav">
         <button className="cook-nav-btn cook-prev" onClick={() => go(-1)} style={{ opacity: idx === 0 ? 0.35 : 1 }}>← Back</button>
-        {idx < total ? <button className="cook-nav-btn cook-next" onClick={() => go(1)}>{idx === 0 ? "Start cooking →" : "Next →"}</button> : <button className="cook-nav-btn cook-next" onClick={onClose}>Done ✓</button>}
+        {idx < total ? <button className="cook-nav-btn cook-next" onClick={() => go(1)}>{idx === 0 ? "Start cooking →" : "Next →"}</button> : <button className="cook-nav-btn cook-next" onClick={() => { if (onMadeIt) onMadeIt(); onClose(); }}>{(() => { const ids = isDinner ? (plan.dishes || []).map(d => d.recipe && d.recipe.id) : [plan.recipe && plan.recipe.id]; return ids.every(id => !id || onTodaysCalendar(id)) ? "Done ✓" : "Done ✓ · log it"; })()}</button>}
       </div>
     </div>
   );
