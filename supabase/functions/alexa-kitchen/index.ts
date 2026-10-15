@@ -155,12 +155,13 @@ function filled(slots: any) {
 // ── calendar ─────────────────────────────────────────────────────────────────
 async function addMeal(date: string, slot: string, recipe: Cand, servings: number) {
   const { error } = await sb.from("calendar").upsert(
-    { date, slot, recipe_id: recipe.id, servings, leftover: false, updated_at: new Date().toISOString() },
+    // added_at now + deleted_at null: a voice add deliberately revives a meal deleted earlier.
+    { date, slot, recipe_id: recipe.id, servings, leftover: false, updated_at: new Date().toISOString(), added_at: new Date().toISOString(), deleted_at: null },
     { onConflict: "date,slot,recipe_id" });
   if (error) throw error;
 }
 async function mealsOn(date: string, slot?: string) {
-  let q = sb.from("calendar").select("slot,recipe_id,leftover").eq("date", date);
+  let q = sb.from("calendar").select("slot,recipe_id,leftover").eq("date", date).is("deleted_at", null);
   if (slot) q = q.eq("slot", slot);
   const { data, error } = await q;
   if (error) throw error;
