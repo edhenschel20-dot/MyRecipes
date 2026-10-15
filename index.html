@@ -601,6 +601,34 @@ async function migrateBase64Photo(dataUrl) {
 const CAL_KNOWN_KEY = "recipebook_cal_known_v1";
 function loadCalKnown() { try { return new Set(JSON.parse(localStorage.getItem(CAL_KNOWN_KEY) || "[]")); } catch { return new Set(); } }
 function saveCalKnown(set) { try { localStorage.setItem(CAL_KNOWN_KEY, JSON.stringify([...set])); } catch {} }
+// Visit every calendar entry; slots hold either one entry or an array.
+function forEachCalEntry(cal, fn) {
+  for (const [date, slots] of Object.entries(cal || {}))
+    for (const [slot, v] of Object.entries(slots || {}))
+      (Array.isArray(v) ? v : [v]).forEach(e => { if (e && e.id) fn(date, slot, e); });
+}
+// Deleted rows are tombstones in the cloud (deleted_at). Drop any local entry
+// the cloud says was deleted after that entry was added here. Returns true if
+// anything was removed.
+function dropTombstoned(cal, tomb) {
+  if (!tomb || !tomb.size) return false;
+  let changed = false;
+  for (const [date, slots] of Object.entries(cal || {})) {
+    for (const [slot, v] of Object.entries(slots || {})) {
+      const arr = Array.isArray(v) ? v : (v ? [v] : []);
+      const keep = arr.filter(e => {
+        const t = e && e.id ? tomb.get(`${date}|${slot}|${e.id}`) : undefined;
+        return !(t !== undefined && t >= (Date.parse(e.addedAt || "") || 0));
+      });
+      if (keep.length !== arr.length) {
+        changed = true;
+        if (keep.length) slots[slot] = keep; else delete slots[slot];
+      }
+    }
+    if (slots && Object.keys(slots).length === 0) delete cal[date];
+  }
+  return changed;
+}
 
 async function syncToSupabase(recipes, pantryItems, calendarData) {
   if (recipes && recipes.length > 0) {
@@ -649,7 +677,9 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
         for (const entry of arr) {
           if (entry && entry.id) {
             const sv = Number(entry.servings);
-            byKey.set(`${date}|${slot}|${entry.id}`, { date, slot, recipe_id: entry.id, servings: (isFinite(sv) && sv > 0) ? sv : 1, leftover: !!entry.leftover, updated_at: new Date().toISOString() });
+            // added_at lets the server refuse to revive a meal deleted after this
+            // entry was added (a stale copy); deleted_at null revives it otherwise.
+            byKey.set(`${date}|${slot}|${entry.id}`, { date, slot, recipe_id: entry.id, servings: (isFinite(sv) && sv > 0) ? sv : 1, leftover: !!entry.leftover, updated_at: new Date().toISOString(), added_at: entry.addedAt || "2000-01-01T00:00:00Z", deleted_at: null });
           }
         }
       }
@@ -674,13 +704,16 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
     for (let k = 0; k < dates.length; k += 40) {
       const chunk = dates.slice(k, k + 40);
       const q = chunk.map(d => `"${d}"`).join(",");
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar?select=id,date,slot,recipe_id&date=in.(${encodeURIComponent(q)})`, { headers: sbHeaders() });
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar?select=id,date,slot,recipe_id&deleted_at=is.null&date=in.(${encodeURIComponent(q)})`, { headers: sbHeaders() });
       if (!res.ok) await fail(res, "read");
       const known = loadCalKnown();
       const staleRows = (await res.json()).filter(r => { const k = `${r.date}|${r.slot}|${r.recipe_id}`; return !byKey.has(k) && known.has(k); });
       const stale = staleRows.map(r => r.id);
       if (stale.length) {
-        const del = await fetch(`${SUPABASE_URL}/rest/v1/calendar?id=in.(${stale.join(",")})`, { method: "DELETE", headers: sbHeaders() });
+        const del = await fetch(`${SUPABASE_URL}/rest/v1/calendar?id=in.(${stale.join(",")})`, {
+          method: "PATCH", headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+          body: JSON.stringify({ deleted_at: new Date().toISOString() })
+        });
         if (!del.ok) await fail(del, "cleanup");
         staleRows.forEach(r => known.delete(`${r.date}|${r.slot}|${r.recipe_id}`)); saveCalKnown(known);
       }
@@ -710,12 +743,19 @@ async function loadFromSupabase() {
   const recipes = recipeRows.map(rowToRecipe);
   const pantry = pantryRows.map(p => ({ ...p, autoDeduct: !!p.auto_deduct, servingSize: p.serving_size||"", servingsPerContainer: p.servings_per_container ?? "" }));
   const calendar = {};
-  for (const row of calRows) {
+  const liveRows = calRows.filter(r => !r.deleted_at);
+  for (const row of liveRows) {
     if (!calendar[row.date]) calendar[row.date] = {};
     if (!calendar[row.date][row.slot]) calendar[row.date][row.slot] = [];
-    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: Number(row.servings) || 1, leftover: !!row.leftover });
+    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: Number(row.servings) || 1, leftover: !!row.leftover, addedAt: row.added_at || undefined });
   }
-  saveCalKnown(new Set(calRows.map(r => `${r.date}|${r.slot}|${r.recipe_id}`)));
+  saveCalKnown(new Set(liveRows.map(r => `${r.date}|${r.slot}|${r.recipe_id}`)));
+  // Purge meals deleted elsewhere from this device's copy before callers merge it.
+  const tomb = new Map(calRows.filter(r => r.deleted_at).map(r => [`${r.date}|${r.slot}|${r.recipe_id}`, Date.parse(r.deleted_at)]));
+  try {
+    const local = JSON.parse(localStorage.getItem(CAL_KEY) || "{}");
+    if (dropTombstoned(local, tomb)) localStorage.setItem(CAL_KEY, JSON.stringify(local));
+  } catch {}
   const ingredientSubs = {};
   (subRows||[]).forEach(r => { if (r && r.key && r.pantry_item_id) ingredientSubs[r.key] = r.pantry_item_id; });
   return { recipes, pantry, calendar, ingredientSubs };
@@ -1249,9 +1289,10 @@ function RecipeBook() {
         });
         // Clean up any calendar rows referencing the deleted recipe too,
         // so a stale row can't resurface on the next pull from another device.
-        await fetch(`${SUPABASE_URL}/rest/v1/calendar?recipe_id=eq.${id}`, {
-          method: "DELETE",
-          headers: sbHeaders()
+        await fetch(`${SUPABASE_URL}/rest/v1/calendar?recipe_id=eq.${id}&deleted_at=is.null`, {
+          method: "PATCH",
+          headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+          body: JSON.stringify({ deleted_at: new Date().toISOString() })
         });
       } catch(e) { console.warn("Supabase delete failed:", e); }
     }
@@ -7559,7 +7600,17 @@ function loadCalendar() {
   try { const r=localStorage.getItem(CAL_KEY); if(r) return JSON.parse(r); } catch {}
   return {};
 }
-function saveCalendar(data) { try { localStorage.setItem(CAL_KEY,JSON.stringify(data)); } catch {} }
+// Stamps entries that are new on this save with addedAt, so the server can tell
+// a meal added here apart from a stale copy of one deleted elsewhere.
+function saveCalendar(data) {
+  try {
+    const had = new Set();
+    forEachCalEntry(loadCalendar(), (d, s, e) => had.add(`${d}|${s}|${e.id}`));
+    const now = new Date().toISOString();
+    forEachCalEntry(data, (d, s, e) => { if (!e.addedAt && !had.has(`${d}|${s}|${e.id}`)) e.addedAt = now; });
+    localStorage.setItem(CAL_KEY,JSON.stringify(data));
+  } catch {}
+}
 function loadCalPrefs() {
   try { const r=localStorage.getItem(CAL_PREFS_KEY); if(r) return JSON.parse(r); } catch {}
   return { dailyGoal: 0, trackingEnabled: false };
