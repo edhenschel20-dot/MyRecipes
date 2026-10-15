@@ -2843,7 +2843,7 @@ function DiscoverTab({recipes,onAddRecipe}) {
   // ── State ─────────────────────────────────────────────────────────────────
   const STAGES = {SETUP:0, PROTEIN:1, COOKER:2, FLAVOR:3, OCCASION:4, DETAILS:5, IDEAS:6, RECIPE:7};
   const [stage, setStage] = useState(STAGES.SETUP);
-  const [selections, setSelections] = useState({protein:"",cooker:"",flavor:[],occasion:"",notes:"",servings:"4"});
+  const [selections, setSelections] = useState({protein:[],cooker:"",flavor:[],occasion:"",notes:"",servings:"4"});
   const [ideas, setIdeas] = useState([]); // [{title, description}]
   const [ideaBatch, setIdeaBatch] = useState(1);
   const [chosenIdea, setChosenIdea] = useState(null);
@@ -2927,13 +2927,16 @@ function DiscoverTab({recipes,onAddRecipe}) {
 
   function getFlavors() { return FLAVORS_BY_COOKER[selections.cooker]||FLAVORS_BY_COOKER.default; }
   function sel(k,v) { setSelections(s=>({...s,[k]:v})); }
+  // Main ingredients are multi-select (chicken + pasta). Up to 3.
+  function toggleProtein(v) { setSelections(s=>{ const cur=Array.isArray(s.protein)?s.protein:(s.protein?[s.protein]:[]); return {...s,protein:cur.includes(v)?cur.filter(x=>x!==v):[...cur,v].slice(0,3)}; }); }
+  const proteinList = Array.isArray(selections.protein)?selections.protein:(selections.protein?[selections.protein]:[]);
   function toggleFlavor(v) { setSelections(s=>({...s,flavor:s.flavor.includes(v)?s.flavor.filter(f=>f!==v):[...s.flavor,v].slice(0,3)})); }
 
   function getContext() {
     const cookerObj = COOKERS.find(c=>c.value===selections.cooker);
     const cookerNotes = cookerObj?.notes ? ` (${cookerObj.notes})` : "";
     return {
-      protein: selections.protein,
+      protein: proteinList.length>1 ? proteinList.join(" + ")+" (use them together in one dish)" : (proteinList[0]||""),
       cooker: selections.cooker + cookerNotes,
       flavors: selections.flavor.join(", ") || "chef's choice",
       occasion: selections.occasion,
@@ -2950,7 +2953,7 @@ function DiscoverTab({recipes,onAddRecipe}) {
     return `I am planning a meal and need recipe ideas. Please suggest 5 options as a simple numbered list — no code, no JSON, just readable text.
 
 My cooking setup:
-- Main ingredient: ${c.protein}
+- Main ingredient(s): ${c.protein}
 - Cooking on: ${c.cooker}
 - Flavor I want: ${c.flavors}
 - Occasion: ${c.occasion}
@@ -3046,7 +3049,7 @@ Start your response with { and end with }. No other text.`;
 
   function resetWizard() {
     setStage(STAGES.SETUP);
-    setSelections({protein:"",cooker:prefs.defaultCooker||"",flavor:[],occasion:"",notes:"",servings:"4"});
+    setSelections({protein:[],cooker:prefs.defaultCooker||"",flavor:[],occasion:"",notes:"",servings:"4"});
     setIdeas([]); setIdeaBatch(1); setChosenIdea(null);
     setIdeasPasteText(""); setRecipePasteText(""); setResult(null);
     setIdeasError(""); setRecipeError("");
@@ -3111,8 +3114,9 @@ Start your response with { and end with }. No other text.`;
       {backBtn(STAGES.SETUP)}
       <div className="ai-panel">
         {stepTitle(1,"What's your main ingredient?")}
-        <div style={chipGrid}>{PROTEINS.map(p=><div key={p.value} style={chipStyle(selections.protein===p.value)} onClick={()=>sel("protein",p.value)}>{p.label}</div>)}</div>
-        <button className="btn btn-primary" disabled={!selections.protein} onClick={()=>setStage(prefs.defaultCooker?STAGES.FLAVOR:STAGES.COOKER)}>Next →</button>
+        <div style={chipGrid}>{PROTEINS.map(p=><div key={p.value} style={chipStyle(proteinList.includes(p.value))} onClick={()=>toggleProtein(p.value)}>{p.label}{proteinList.includes(p.value)&&<span style={{marginLeft:'auto',fontSize:11}}>✓</span>}</div>)}</div>
+        <div style={{fontSize:12,color:"var(--ink-light)",margin:"-4px 0 10px"}}>Pick up to 3 — e.g. Chicken + Pasta.</div>
+        <button className="btn btn-primary" disabled={!proteinList.length} onClick={()=>setStage(prefs.defaultCooker?STAGES.FLAVOR:STAGES.COOKER)}>Next →</button>
       </div>
     </div>
   );
@@ -3185,7 +3189,7 @@ Start your response with { and end with }. No other text.`;
           Your Request{ideaBatch>1?` — Batch ${ideaBatch}`:""}
         </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16}}>
-          {[selections.protein,COOKERS.find(c=>c.value===selections.cooker)?.label,...selections.flavor.map(f=>f.split(",")[0]),OCCASIONS.find(o=>o.value===selections.occasion)?.label,"👤 "+selections.servings].filter(Boolean).map((x,i)=>(
+          {[...proteinList,COOKERS.find(c=>c.value===selections.cooker)?.label,...selections.flavor.map(f=>f.split(",")[0]),OCCASIONS.find(o=>o.value===selections.occasion)?.label,"👤 "+selections.servings].filter(Boolean).map((x,i)=>(
             <span key={i} style={{background:'var(--parchment-dark)',padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:600}}>{x}</span>
           ))}
         </div>
