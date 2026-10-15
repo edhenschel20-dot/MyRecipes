@@ -445,6 +445,56 @@ async function sbGet(table) {
   return res.json();
 }
 
+// Rating replaces the favorite heart. favorite stays in the DB, derived as
+// rating >= 4, so Cook Tonight and the sale planner keep working unchanged.
+function recipeRating(r) { return r && r.rating != null ? r.rating : (r && r.favorite ? 4 : null); }
+// Auto-staples: planned on the calendar on 3+ different days in the last
+// 90 days (leftover entries don't count). Recomputed by App on each render.
+let AUTO_STAPLE = new Map();
+function computeAutoStaples(cal) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const from = new Date(today); from.setDate(from.getDate() - 90);
+  const iso = d => d.toISOString().slice(0,10);
+  const lo = iso(from), hi = iso(today);
+  const days = new Map();
+  const add = (id, date) => { if (!id) return; if (!days.has(id)) days.set(id, new Set()); days.get(id).add(date); };
+  const walk = (v, date) => {
+    if (!v) return;
+    if (typeof v === "string") return add(v, date);
+    if (Array.isArray(v)) return v.forEach(x => walk(x, date));
+    if (typeof v === "object" && !v.leftover) add(v.id || v.recipeId, date);
+  };
+  for (const [date, slots] of Object.entries(cal || {})) {
+    if (date < lo || date > hi || !slots || typeof slots !== "object") continue;
+    Object.values(slots).forEach(v => walk(v, date));
+  }
+  const out = new Map();
+  days.forEach((set, id) => { if (set.size >= 3) out.set(id, set.size); });
+  return out;
+}
+function isStapleRecipe(r) { return !!(r && (r.staple || AUTO_STAPLE.has(r.id))); }
+
+async function sbPatchRecipe(id, fields) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/recipes?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { ...sbHeaders(), "Prefer": "return=minimal" },
+    body: JSON.stringify(fields)
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(`Supabase patch recipes failed: ${res.status} ${t.slice(0,100)}`); }
+}
+function StarRating({ value, onChange, size }) {
+  const v = value || 0;
+  return (
+    <span style={{display:"inline-flex",gap:1,whiteSpace:"nowrap"}} onClick={e=>e.stopPropagation()}>
+      {[1,2,3,4,5].map(n=>(
+        <button key={n} type="button" aria-label={`${n} star${n>1?"s":""}`}
+          onClick={()=>onChange && onChange(n===v ? null : n)}
+          style={{background:"none",border:"none",padding:"2px 1px",cursor:onChange?"pointer":"default",fontSize:size||22,lineHeight:1,color:n<=v?"#e8a317":"#c9c2b6",WebkitTapHighlightColor:"transparent"}}>★</button>
+      ))}
+    </span>
+  );
+}
+
 async function sbUpsert(table, rows) {
   if (!rows || rows.length === 0) return;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
@@ -477,7 +527,9 @@ function recipeToRow(r) {
     steps: r.steps || [],
     notes: r.notes || "",
     description: r.description || "",
-    favorite: r.favorite || false,
+    rating: recipeRating(r),
+    staple: !!r.staple,
+    favorite: (recipeRating(r) || 0) >= 4,
     source: r.source || "",
     photos: (r.photos||[]).filter(p => p && !p.startsWith('data:')),
     updated_at: new Date().toISOString()
@@ -508,7 +560,9 @@ function rowToRecipe(row) {
     steps: row.steps || [],
     notes: row.notes || "",
     description: row.description || "",
-    favorite: row.favorite || false,
+    rating: row.rating != null ? row.rating : (row.favorite ? 4 : null),
+    staple: !!row.staple,
+    favorite: (row.rating != null ? row.rating : (row.favorite ? 4 : 0)) >= 4,
     source: row.source || "",
     photos: row.photos || []
   };
@@ -938,7 +992,7 @@ function RecipeBook() {
   const [filterTag, setFilterTag] = useState("");
   const [filterDiet, setFilterDiet] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
-  const [filterFavorites, setFilterFavorites] = useState(false);
+  const [filterFavorites, setFilterFavorites] = useState("");
   const [hideQuickAdd, setHideQuickAdd] = useState(true);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [planRecipe, setPlanRecipe] = useState(null);
@@ -1069,16 +1123,25 @@ function RecipeBook() {
     if (!blockSave.current) saveData(data);
   }, [data]);
 
-  function toggleFavorite(id) {
+  function patchRecipeLocal(id, fields) {
     setData(d => {
-      const updated = {...d, recipes: d.recipes.map(r => r.id===id ? {...r, favorite:!r.favorite} : r)};
-      // Keep selectedRecipe in sync
+      const updated = {...d, recipes: d.recipes.map(r => r.id===id ? {...r, ...fields} : r)};
       if (selectedRecipe?.id === id) {
         const found = updated.recipes.find(r => r.id===id);
         if (found) setSelectedRecipe(found);
       }
       return updated;
     });
+    // Push just these fields, so a stale copy of the rest of the recipe
+    // on this device can't overwrite anything.
+    if (loadSyncPrefs().enabled) sbPatchRecipe(id, fields).catch(e => console.warn("Rating sync failed:", e));
+  }
+  function setRating(id, rating) {
+    patchRecipeLocal(id, { rating: rating || null, favorite: (rating || 0) >= 4 });
+  }
+  function toggleStaple(id) {
+    const r = recipes.find(x => x.id === id);
+    patchRecipeLocal(id, { staple: !(r && r.staple) });
   }
 
   function findDuplicate(title, excludeId) {
@@ -1201,6 +1264,7 @@ function RecipeBook() {
     }
   }
 
+  AUTO_STAPLE = computeAutoStaples(loadCalendar());
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
   const allDiets = [...new Set(recipes.flatMap(r=>r.diets||[]))];
@@ -1212,7 +1276,8 @@ function RecipeBook() {
       && (!filterTag || (r.tags||[]).includes(filterTag))
       && (!filterDiet || (r.diets||[]).includes(filterDiet))
       && (!filterCategory || (r.categories||[]).includes(filterCategory))
-      && (!filterFavorites || r.favorite === true)
+      && (!filterFavorites
+          || (filterFavorites === "staple" ? isStapleRecipe(r) : (recipeRating(r) || 0) >= Number(filterFavorites)))
       && (!hideQuickAdd || !(r.isQuickAdd || (r.tags||[]).includes("quick-add")));
   });
 
@@ -1274,7 +1339,7 @@ function RecipeBook() {
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onToggleFavorite={toggleFavorite} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onToggleFavorite={toggleFavorite} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onSetRating={setRating} onToggleStaple={toggleStaple} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
@@ -1346,7 +1411,7 @@ function RecipeBook() {
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onToggleFavorite,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onSetRating,onToggleStaple,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan}) {
   const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
@@ -1372,12 +1437,19 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
           <option value="cuisine">Cuisine</option>
           <option value="fastest">⏱ Fastest</option>
           <option value="calories">🔥 Calories</option>
+          <option value="rating">★ Rating</option>
         </select>
-        <button className={`fav-filter-btn${filterFavorites?" active":""}`} onClick={()=>setFilterFavorites(f=>!f)}>❤️</button>
+        <select className="filter-select" value={filterFavorites} onChange={e=>setFilterFavorites(e.target.value)}>
+          <option value="">★ Any</option>
+          <option value="5">★★★★★</option>
+          <option value="4">★★★★ & up</option>
+          <option value="3">★★★ & up</option>
+          <option value="staple">🔁 Staples</option>
+        </select>
         <button className={`fav-filter-btn${hideQuickAdd?" active":""}`} title="Hide quick-add meals" onClick={()=>setHideQuickAdd(h=>!h)}>⚡️🚫</button>
       </div>
       {selectedRecipe ? (
-        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onToggleFavorite={onToggleFavorite} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} />
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onSetRating={onSetRating} onToggleStaple={onToggleStaple} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} />
       ) : recipes.length===0 ? (
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
@@ -1390,6 +1462,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
             else if(sortBy==='fastest') s.sort((a,b)=>((a.prepTime||0)+(a.cookTime||0))-((b.prepTime||0)+(b.cookTime||0)));
             else if(sortBy==='calories') s.sort((a,b)=>(a.calories||9999)-(b.calories||9999));
             else if(sortBy==='oldest') s.reverse();
+            else if(sortBy==='rating') s.sort((a,b)=>(recipeRating(b)||0)-(recipeRating(a)||0)||(isStapleRecipe(b)?1:0)-(isStapleRecipe(a)?1:0)||a.title.localeCompare(b.title));
             return s;
           })().map(r=>(
             <div key={r.id} className="recipe-card" onClick={()=>{setSelectedRecipe(r); window.history.pushState({recipe:true}, '');}}>
@@ -1426,11 +1499,12 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
                   <div className="recipe-card-title">{r.title}</div>
                   <div style={{display:'flex',gap:4,flexShrink:0}}>
                     <button className="fav-btn" title="Add to Meal Plan" onClick={e=>{e.stopPropagation();onAddToPlan(r);}}>📅</button>
-                    <button className="fav-btn" onClick={e=>{e.stopPropagation();onToggleFavorite(r.id);}}>{r.favorite?"❤️":"🤍"}</button>
+                    {recipeRating(r) ? <span style={{color:"#e8a317",fontSize:14,fontWeight:700,whiteSpace:"nowrap",alignSelf:"center"}}>★{recipeRating(r)}</span> : null}
                   </div>
                 </div>
                 <div className="recipe-card-meta">
                   {(r.categories||[]).map(c=><span key={c} style={{background:'var(--saffron)',color:'white',padding:'1px 7px',borderRadius:2,fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px'}}>{c}</span>)}
+                  {isStapleRecipe(r) && <span style={{background:'var(--ink-mid)',color:'white',padding:'1px 7px',borderRadius:2,fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.5px'}}>🔁 Staple</span>}
                   {r.cuisine && <span>🌍 {r.cuisine}</span>}
                   {r.prepTime!=null && <span>⏱ {(r.prepTime||0)+(r.cookTime||0)} min</span>}
                   {r.servings && <span>👤 {r.servings}</span>}
@@ -1477,7 +1551,7 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
   );
 }
 
-function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleFavorite,onQuickPhoto,onAddToPlan}) {
+function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRating,onToggleStaple,onQuickPhoto,onAddToPlan}) {
   const safe = normalizeRecipe({...recipe});
     const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
@@ -1491,7 +1565,10 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onToggleF
       <div className="recipe-action-bar">
         <button className="recipe-action-btn recipe-action-btn-edit" onClick={()=>{window.history.back();}}>← Back</button>
         <div style={{flex:1}}/>
-        <button className="recipe-action-btn-fav" onClick={()=>onToggleFavorite(safe.id)}>{safe.favorite?"❤️":"🤍"}</button>
+        <StarRating value={recipeRating(safe)} onChange={n=>onSetRating(safe.id, n)} size={22} />
+        <button className="recipe-action-btn recipe-action-btn-edit"
+          title={AUTO_STAPLE.has(safe.id) && !safe.staple ? `Auto: on the calendar ${AUTO_STAPLE.get(safe.id)} days in the last 90. Tap to pin it as a staple.` : "Staple — something you make all the time"}
+          style={isStapleRecipe(safe)?{background:'var(--ink-mid)',color:'white'}:{}} onClick={()=>onToggleStaple(safe.id)}>🔁 {safe.staple?"Staple":AUTO_STAPLE.has(safe.id)?`Staple · ${AUTO_STAPLE.get(safe.id)}×`:"Staple?"}</button>
         <label className="recipe-action-btn recipe-action-btn-edit" style={{cursor:"pointer",display:"inline-flex",alignItems:"center"}} title="Add photo">
           <input type="file" accept="image/*" style={{width:"0.1px",height:"0.1px",opacity:0,position:"absolute",zIndex:-1}}
             onChange={async e=>{
@@ -4569,7 +4646,7 @@ function buildTonight(assessed, pantry) {
   // A one-line recipe ("Smoked Sausage": 1 ingredient) is not "one item
   // away" from anything; it needs the one thing it is. Those sit in shop.
   const substantial = a => a.needed >= 2;
-  const readyMeals = mains.filter(a => a.ready).sort((a, b) => (b.recipe.favorite ? 1 : 0) - (a.recipe.favorite ? 1 : 0) || byPct(a, b));
+  const readyMeals = mains.filter(a => a.ready).sort((a, b) => (recipeRating(b.recipe) || 0) - (recipeRating(a.recipe) || 0) || (isStapleRecipe(b.recipe) ? 1 : 0) - (isStapleRecipe(a.recipe) ? 1 : 0) || byPct(a, b));
   const oneAway = mains.filter(a => !a.ready && substantial(a) && a.missing.length === 1 && !a.missingStar && a.unknown.length === 0).sort(byPct);
   const needProtein = mains.filter(a => !a.ready && substantial(a) && a.missingStar && a.missing.length <= 2 && a.missing.every(isStarItem) && a.unknown.length === 0).sort(byPct);
   // "Probably close" is for an unchecked garnish, not an unchecked salmon
