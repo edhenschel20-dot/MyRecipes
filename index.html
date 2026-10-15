@@ -679,7 +679,7 @@ async function syncToSupabase(recipes, pantryItems, calendarData) {
             const sv = Number(entry.servings);
             // added_at lets the server refuse to revive a meal deleted after this
             // entry was added (a stale copy); deleted_at null revives it otherwise.
-            byKey.set(`${date}|${slot}|${entry.id}`, { date, slot, recipe_id: entry.id, servings: (isFinite(sv) && sv > 0) ? sv : 1, leftover: !!entry.leftover, updated_at: new Date().toISOString(), added_at: entry.addedAt || "2000-01-01T00:00:00Z", deleted_at: null });
+            byKey.set(`${date}|${slot}|${entry.id}`, { date, slot, recipe_id: entry.id, servings: (isFinite(sv) && sv > 0) ? sv : 1, leftover: !!entry.leftover, updated_at: new Date().toISOString(), added_at: entry.addedAt || "2000-01-01T00:00:00Z", deleted_at: null, for_member: entry.forMember || null });
           }
         }
       }
@@ -747,7 +747,7 @@ async function loadFromSupabase() {
   for (const row of liveRows) {
     if (!calendar[row.date]) calendar[row.date] = {};
     if (!calendar[row.date][row.slot]) calendar[row.date][row.slot] = [];
-    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: Number(row.servings) || 1, leftover: !!row.leftover, addedAt: row.added_at || undefined });
+    calendar[row.date][row.slot].push({ id: row.recipe_id, servings: Number(row.servings) || 1, leftover: !!row.leftover, addedAt: row.added_at || undefined, forMember: row.for_member || undefined });
   }
   saveCalKnown(new Set(liveRows.map(r => `${r.date}|${r.slot}|${r.recipe_id}`)));
   // Purge meals deleted elsewhere from this device's copy before callers merge it.
@@ -1344,6 +1344,8 @@ function RecipeBook() {
     return added;
   }
 
+  const [hhVersion, setHhVersion] = useState(0);
+  useEffect(() => { fetchHousehold().then(() => setHhVersion(v => v + 1)).catch(() => {}); }, []);
   AUTO_STAPLE = computeAutoStaples(loadCalendar());
   const cuisines = [...new Set(recipes.map(r=>r.cuisine).filter(Boolean))];
   const allTags = [...new Set(recipes.flatMap(r=>r.tags||[]))];
@@ -1415,11 +1417,11 @@ function RecipeBook() {
           </div>
         </header>
         <nav className="nav-tabs">
-          {[["library","📚 Library"],["discover","✨ AI Discovery"],["tonight","🍳 Cook Tonight"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"]].map(([id,label])=>(
+          {[["library","📚 Library"],["discover","✨ AI Discovery"],["tonight","🍳 Cook Tonight"],["saleweek","🏷️ Sale Week"],["dinner","🍽 Dinner Planner"],["pantry","🥫 Pantry"],["calendar","📅 Calendar"],["foodlog","📋 Food Log"],["household","👪 Our Kitchen"]].map(([id,label])=>(
             <button key={id} className={`nav-tab${tab===id?" active":""}`} onClick={()=>setTab(id)}>{label}</button>
           ))}
         </nav>
-        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onSetRating={setRating} onToggleStaple={toggleStaple} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} onMadeIt={logMadeToday} />}
+        {tab==="library" && <LibraryTab recipes={filtered} cuisines={cuisines} allTags={allTags} allDiets={allDiets} search={search} setSearch={setSearch} filterCuisine={filterCuisine} setFilterCuisine={setFilterCuisine} filterTag={filterTag} setFilterTag={setFilterTag} filterDiet={filterDiet} setFilterDiet={setFilterDiet} filterCategory={filterCategory} setFilterCategory={setFilterCategory} allCategories={allCategories} filterFavorites={filterFavorites} setFilterFavorites={setFilterFavorites} hideQuickAdd={hideQuickAdd} setHideQuickAdd={setHideQuickAdd} onSetRating={setRating} onToggleStaple={toggleStaple} selectedRecipe={selectedRecipe} setSelectedRecipe={setSelectedRecipe} onEdit={setEditRecipe} onDelete={deleteRecipe} onCook={startCookMode} onLightbox={openLightbox} onQuickPhoto={quickPhoto} onAddToPlan={setPlanRecipe} onMadeIt={logMadeToday} onSaveRecipe={upsertRecipe} />}
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
@@ -1440,6 +1442,7 @@ function RecipeBook() {
         {tab==="pantry" && <PantryTab recipes={recipes} version={pantryVersion} />}
         {tab==="calendar" && <CalendarTab recipes={recipes} version={calVersion} onQuickAddRecipe={upsertRecipe} onStartMealCook={startMealCook} />}
         {tab==="foodlog" && <FoodLogTab recipes={recipes} />}
+        {tab==="household" && <HouseholdTab />}
       </div>
       {showAddMenu && (
         <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setShowAddMenu(false)}>
@@ -1491,7 +1494,7 @@ function RecipeBook() {
 }
 
 // ── Library Tab ────────────────────────────────────────────────────────────
-function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onSetRating,onToggleStaple,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan,onMadeIt}) {
+function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setSearch,filterCuisine,setFilterCuisine,filterTag,setFilterTag,filterDiet,setFilterDiet,filterCategory,setFilterCategory,filterFavorites,setFilterFavorites,hideQuickAdd,setHideQuickAdd,onSetRating,onToggleStaple,selectedRecipe,setSelectedRecipe,onEdit,onDelete,onCook,onLightbox,onQuickPhoto,onAddToPlan,onMadeIt,onSaveRecipe}) {
   const [sortBy, setSortBy] = useState('newest');
   return (
     <div>
@@ -1529,7 +1532,7 @@ function LibraryTab({recipes,cuisines,allTags,allDiets,allCategories,search,setS
         <button className={`fav-filter-btn${hideQuickAdd?" active":""}`} title="Hide quick-add meals" onClick={()=>setHideQuickAdd(h=>!h)}>⚡️🚫</button>
       </div>
       {selectedRecipe ? (
-        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onSetRating={onSetRating} onToggleStaple={onToggleStaple} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} onMadeIt={onMadeIt} />
+        <RecipeDetail recipe={selectedRecipe} onBack={()=>setSelectedRecipe(null)} onEdit={onEdit} onDelete={onDelete} onCook={onCook} onLightbox={onLightbox} onSetRating={onSetRating} onToggleStaple={onToggleStaple} onQuickPhoto={onQuickPhoto} onAddToPlan={onAddToPlan} onMadeIt={onMadeIt} onSaveRecipe={onSaveRecipe} />
       ) : recipes.length===0 ? (
         <div className="empty-state"><div className="empty-icon">🍳</div><div className="empty-title">No recipes found</div><p>Try adjusting your filters or add a new recipe.</p></div>
       ) : (
@@ -1631,8 +1634,9 @@ function DetailHero({safe, onCook, onEdit, onDelete, onLightbox}) {
   );
 }
 
-function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRating,onToggleStaple,onQuickPhoto,onAddToPlan,onMadeIt}) {
+function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRating,onToggleStaple,onQuickPhoto,onAddToPlan,onMadeIt,onSaveRecipe}) {
   const [madeTick, setMadeTick] = useState(0);
+  const [adapting, setAdapting] = useState(false);
   const safe = normalizeRecipe({...recipe});
     const [servings, setServings] = useState(safe.servings);
   const base = safe.servings;
@@ -1674,7 +1678,10 @@ function RecipeDetail({recipe,onBack,onEdit,onDelete,onCook,onLightbox,onSetRati
             ? <span className="btn btn-ghost rate-chip" style={{background:'var(--ink)',color:'white',cursor:'default'}} title="On today's calendar">✓ Made today</span>
             : <button className="btn btn-ghost rate-chip" title={`Log it on today's calendar (${slotForNow()})`}
                 onClick={async()=>{ await onMadeIt([{ id: safe.id, servings: safe.servings }]); setMadeTick(t=>t+1); }}>🍽 Made it</button>)}
+        {householdPeople().length>0&&<button className="btn btn-ghost rate-chip" title="Make it work for someone who won't eat part of it" onClick={()=>setAdapting(true)}>🔁 Adapt for…</button>}
       </div>
+      <MealConflicts recipe={safe} />
+      {adapting&&<AdaptModal recipe={safe} onSaveRecipe={r=>onSaveRecipe&&onSaveRecipe(r)} onEditNew={r=>{setAdapting(false); onEdit(r);}} onClose={()=>setAdapting(false)} />}
       <div className="detail-panel">
         <DetailHero safe={safe} onCook={()=>onCook(safe, scale)} onEdit={()=>onEdit(safe)} onDelete={()=>onDelete(safe.id)} onLightbox={onLightbox} />
 
@@ -2949,6 +2956,7 @@ My cooking setup:
 - Occasion: ${c.occasion}
 - Servings: ${c.servings}
 ${c.notes ? `- Extra: ${c.notes}` : ""}
+${householdSummary()}
 ${c.existing}${batchNote}
 
 Show me 5 numbered recipe ideas like this:
@@ -2972,6 +2980,8 @@ Recipe to create: "${idea.title}"
 Cooking on: ${c.cooker}
 Servings: ${c.servings}
 ${c.notes ? `Notes: ${c.notes}` : ""}
+${householdSummary()}
+If someone won't eat part of this dish, put how to plate their portion in the notes field (for example "Ed's plate: serve over buttered noodles instead of rice").
 
 YOUR RESPONSE MUST BE ONLY RAW JSON TEXT. Do not use any formatting, do not create a recipe card, do not use headers or bullets. Just type the JSON starting with { and ending with }. I will copy and paste your raw text response into my app.
 
@@ -7757,6 +7767,291 @@ function CalorieBar({ consumed, goal }) {
   );
 }
 
+// ── Household: who eats here, and what they will and won't eat ───────────────
+// Rows live in Supabase (household_member) and are cached locally. Used by the
+// conflict flags, per-person ("just for") calendar meals and every AI prompt.
+const HOUSEHOLD_KEY = "recipebook_household_v1";
+let HOUSEHOLD = (() => { try { return JSON.parse(localStorage.getItem(HOUSEHOLD_KEY) || "[]"); } catch { return []; } })();
+async function fetchHousehold() {
+  const rows = await sbGet("household_member");
+  rows.sort((a, b) => (a.sort || 0) - (b.sort || 0));
+  HOUSEHOLD = rows;
+  try { localStorage.setItem(HOUSEHOLD_KEY, JSON.stringify(rows)); } catch {}
+  return rows;
+}
+async function saveHouseholdMember(m) {
+  const row = { id: m.id, kind: m.kind || "person", name: m.name, sort: m.sort || 0, loves: m.loves || [], wont_eat: m.wont_eat || [],
+    trying: m.trying || [], plain: !!m.plain, notes: m.notes || "", updated_at: new Date().toISOString() };
+  await sbUpsert("household_member", [row]);
+  HOUSEHOLD = [...HOUSEHOLD.filter(x => x.id !== row.id), row].sort((a, b) => (a.sort || 0) - (b.sort || 0));
+  try { localStorage.setItem(HOUSEHOLD_KEY, JSON.stringify(HOUSEHOLD)); } catch {}
+  return row;
+}
+function householdPeople() { return HOUSEHOLD.filter(m => m.kind !== "household"); }
+function memberName(id) { const m = HOUSEHOLD.find(x => x.id === id); return m ? m.name : id; }
+
+// Plain-text summary for AI prompts.
+function householdSummary() {
+  const people = householdPeople();
+  if (!people.length) return "";
+  const lines = people.map(p => {
+    const bits = [];
+    if ((p.wont_eat || []).length) bits.push(`won't eat ${p.wont_eat.join(", ")}`);
+    if (p.plain) bits.push("keeps it plain (sauces, cheese and spice on the side)");
+    if ((p.loves || []).length) bits.push(`loves ${p.loves.join(", ")}`);
+    if ((p.trying || []).length) bits.push(`is starting to try ${p.trying.join(", ")}`);
+    if (p.notes) bits.push(p.notes);
+    return `- ${p.name}: ${bits.join("; ") || "eats most things"}`;
+  });
+  const kitchen = HOUSEHOLD.find(m => m.kind === "household");
+  return `Who's eating:\n${lines.join("\n")}${kitchen && kitchen.notes ? `\nOur kitchen: ${kitchen.notes}` : ""}\n`
+    + `When a dish centers on something one person won't eat, keep the dish for everyone else and give that person an easy separate side or plate rather than dropping the dish. For anyone who keeps it plain, keep heat and sauces optional or on the side.`;
+}
+
+// Which household members have a problem with a recipe?
+const SPICY_RE = /\b(cayenne|jalape|habanero|serrano|chipotle|sriracha|hot sauce|buffalo|nashville|red pepper flakes|crushed red pepper|chili flakes|gochujang|calabrian|cajun|ghost pepper|thai chili|hot honey)/i;
+function wontEatRe(term) {
+  const t = String(term).trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // "rice" should not fire on "rice vinegar" or "rice wine".
+  return new RegExp(`\\b${t}(e?s)?\\b(?!\\s+(vinegar|wine|paper|flour|krispies))`, "i");
+}
+function memberConflicts(recipe, members) {
+  if (!recipe) return [];
+  const text = [recipe.title || "", ...(recipe.ingredients || []).map(i => typeof i === "string" ? i : (i && (i.name || i.item)) || "")].join("\n");
+  return (members || householdPeople()).map(m => ({
+    member: m,
+    hits: (m.wont_eat || []).filter(t => t && wontEatRe(t).test(text)),
+    spicy: !!m.plain && SPICY_RE.test(text),
+  })).filter(c => c.hits.length || c.spicy);
+}
+function conflictLabel(c) {
+  const parts = [...c.hits];
+  if (c.spicy) parts.push("spicy");
+  return `${c.member.name}: ${parts.join(", ")}`;
+}
+
+// Small reusable chip list editor.
+function ChipEditor({ values, onChange, placeholder, color }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const parts = draft.split(",").map(s => s.trim()).filter(Boolean);
+    if (parts.length) onChange([...(values || []), ...parts.filter(p => !(values || []).some(v => v.toLowerCase() === p.toLowerCase()))]);
+    setDraft("");
+  };
+  return (
+    <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+      {(values || []).map(v => (
+        <span key={v} style={{background:color||"var(--parchment-dark)",borderRadius:12,padding:"3px 4px 3px 10px",fontSize:13,display:"inline-flex",alignItems:"center",gap:4}}>
+          {v}
+          <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter(x => x !== v))}
+            style={{border:"none",background:"none",cursor:"pointer",fontSize:15,lineHeight:1,padding:"0 4px",color:"var(--ink-mid)"}}>×</button>
+        </span>
+      ))}
+      <input value={draft} onChange={e => setDraft(e.target.value)} placeholder={placeholder}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} onBlur={add}
+        style={{flex:"1 1 120px",minWidth:120,border:"1px solid var(--ink-mid)",borderRadius:4,padding:"6px 8px",fontSize:14,background:"var(--cream)"}} />
+    </div>
+  );
+}
+
+function MemberCard({ member, onSaved }) {
+  const [m, setM] = useState(member);
+  const [state, setState] = useState("");
+  useEffect(() => setM(member), [member.id]);
+  const dirty = JSON.stringify(m) !== JSON.stringify(member);
+  const set = (k, v) => setM(x => ({ ...x, [k]: v }));
+  async function save() {
+    setState("saving");
+    try { const row = await saveHouseholdMember(m); onSaved(row); setState("saved"); setTimeout(() => setState(""), 1500); }
+    catch (e) { setState("error: " + e.message); }
+  }
+  const isKitchen = m.kind === "household";
+  const label = t => <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"var(--ink-mid)",margin:"12px 0 6px"}}>{t}</div>;
+  return (
+    <div style={{background:"var(--cream)",border:"1px solid var(--parchment-dark)",borderRadius:8,padding:16,marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+        {isKitchen
+          ? <div style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700}}>🍳 Our kitchen</div>
+          : <input value={m.name} onChange={e => set("name", e.target.value)} aria-label="Name"
+              style={{fontFamily:"'Playfair Display',serif",fontSize:19,fontWeight:700,border:"none",background:"transparent",padding:0,minWidth:0,flex:1}} />}
+        {!isKitchen && (
+          <label style={{fontSize:13,display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",cursor:"pointer"}}>
+            <input type="checkbox" checked={!!m.plain} onChange={e => set("plain", e.target.checked)} /> Keeps it plain
+          </label>
+        )}
+      </div>
+      {!isKitchen && <>
+        {label("Won't eat — meals with these get flagged")}
+        <ChipEditor values={m.wont_eat} onChange={v => set("wont_eat", v)} placeholder="e.g. rice, mushrooms" color="#f6d5cf" />
+        {label("Loves")}
+        <ChipEditor values={m.loves} onChange={v => set("loves", v)} placeholder="e.g. smash burgers" color="#dcebd2" />
+        {label("Starting to try")}
+        <ChipEditor values={m.trying} onChange={v => set("trying", v)} placeholder="new foods they're warming up to" color="#e3e0f3" />
+      </>}
+      {label(isKitchen ? "Equipment, style, rules for the whole house" : "Notes")}
+      <textarea value={m.notes} onChange={e => set("notes", e.target.value)} rows={isKitchen ? 4 : 2}
+        style={{width:"100%",boxSizing:"border-box",border:"1px solid var(--ink-mid)",borderRadius:4,padding:8,fontSize:14,fontFamily:"inherit",background:"var(--cream)"}} />
+      <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10}}>
+        <button className="btn btn-primary btn-sm" disabled={!dirty || state === "saving"} onClick={save}>{state === "saving" ? "Saving…" : "Save"}</button>
+        {state === "saved" && <span style={{fontSize:13,color:"var(--ink-mid)"}}>✓ Saved</span>}
+        {state.startsWith("error") && <span style={{fontSize:13,color:"var(--rust)"}}>{state}</span>}
+      </div>
+    </div>
+  );
+}
+
+function HouseholdTab() {
+  const [rows, setRows] = useState(HOUSEHOLD);
+  const [err, setErr] = useState("");
+  useEffect(() => { fetchHousehold().then(setRows).catch(e => setErr(e.message)); }, []);
+  async function addPerson() {
+    const name = (window.prompt("Name?") || "").trim();
+    if (!name) return;
+    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "person";
+    while (rows.some(r => r.id === id)) id += "-2";
+    const row = await saveHouseholdMember({ id, kind: "person", name, sort: rows.length + 1 });
+    setRows(HOUSEHOLD.slice());
+  }
+  return (
+    <div style={{maxWidth:640}}>
+      <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,fontWeight:700,marginBottom:4}}>👪 Our kitchen</div>
+      <p style={{fontSize:14,color:"var(--ink-mid)",marginTop:0,lineHeight:1.5}}>
+        What each person will and won't eat. Meals with a "won't eat" item get flagged on the calendar with a one-tap side,
+        and AI Discovery plans around it.
+      </p>
+      {err && <p style={{color:"var(--rust)",fontSize:13}}>Couldn't load from the cloud: {err}</p>}
+      {rows.map(r => <MemberCard key={r.id} member={r} onSaved={() => setRows(HOUSEHOLD.slice())} />)}
+      <button className="btn btn-outline" onClick={addPerson}>+ Add a person</button>
+    </div>
+  );
+}
+
+// Flags for one planned meal, with a one-tap side for whoever it doesn't suit.
+function MealConflicts({ recipe, coveredIds, onSide }) {
+  const cs = memberConflicts(recipe);
+  if (!cs.length) return null;
+  return (
+    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:6}}>
+      {cs.map(c => coveredIds && coveredIds.includes(c.member.id)
+        ? <span key={c.member.id} style={{fontSize:12,background:"#dcebd2",borderRadius:12,padding:"2px 9px"}}>✓ {c.member.name} has their own plate</span>
+        : <span key={c.member.id} style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,background:"#f6d5cf",borderRadius:12,padding:"2px 4px 2px 9px"}}>
+            ⚠ {conflictLabel(c)}
+            {onSide && <button className="btn btn-sm" style={{fontSize:11,padding:"2px 8px",borderRadius:10}} onClick={() => onSide(c.member)}>+ side for {c.member.name}</button>}
+          </span>)}
+    </div>
+  );
+}
+
+// Pick a side (or any meal) for one person.
+function SidePickerModal({ member, recipes, onPick, onClose }) {
+  const [q, setQ] = useState("");
+  const [any, setAny] = useState(false);
+  const ok = r => !memberConflicts(r, [member]).length;
+  const list = recipes
+    .filter(r => !(r.tags || []).includes("quick-add") || any)
+    .filter(r => any || (r.categories || []).some(c => /side/i.test(c)))
+    .filter(ok)
+    .filter(r => !q || r.title.toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (recipeRating(b) || 0) - (recipeRating(a) || 0) || (isStapleRecipe(b) ? 1 : 0) - (isStapleRecipe(a) ? 1 : 0) || a.title.localeCompare(b.title))
+    .slice(0, 60);
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{maxWidth:440}}>
+        <div className="modal-title">{any ? `A meal just for ${member.name}` : `A side for ${member.name}`}</div>
+        <input className="search-input" autoFocus placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} style={{width:"100%",boxSizing:"border-box",marginBottom:8}} />
+        <label style={{fontSize:13,display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+          <input type="checkbox" checked={any} onChange={e => setAny(e.target.checked)} /> Show all recipes, not just sides
+        </label>
+        <div style={{maxHeight:"50vh",overflowY:"auto",border:"1px solid var(--parchment-dark)",borderRadius:6}}>
+          {list.length === 0 && <div style={{padding:12,fontSize:13,color:"var(--ink-mid)"}}>Nothing matches.</div>}
+          {list.map(r => (
+            <button key={r.id} onClick={() => onPick(r)}
+              style={{display:"block",width:"100%",textAlign:"left",padding:"10px 12px",border:"none",borderBottom:"1px solid var(--parchment-dark)",background:"none",cursor:"pointer",fontSize:14}}>
+              {r.title}{recipeRating(r) ? <span style={{color:"#e8a317",marginLeft:6}}>★{recipeRating(r)}</span> : null}
+            </button>
+          ))}
+        </div>
+        <button className="btn btn-ghost" style={{marginTop:10}} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// Make a recipe work for one person: a plate note for them, or a rewrite.
+function AdaptModal({ recipe, onSaveRecipe, onEditNew, onClose }) {
+  const cs = memberConflicts(recipe);
+  const people = householdPeople();
+  const [who, setWho] = useState((cs[0] && cs[0].member.id) || (people[0] && people[0].id));
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
+  const person = people.find(p => p.id === who);
+  const avoid = person ? [...(person.wont_eat || []), ...(person.plain ? ["spicy heat (keep it plain)"] : [])] : [];
+  async function ask(prompt, max) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/claude-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "x-claude-secret": "henschel-claude-2026" },
+      body: JSON.stringify({ action: "ai", content: prompt, max_tokens: max })
+    });
+    const w = await res.json();
+    if (w.error) throw new Error(w.error);
+    return (w.data.content || []).map(b => b.text || "").join("").trim();
+  }
+  const recipeText = `Recipe: ${recipe.title}\nServes ${recipe.servings || 4}\nIngredients:\n${(recipe.ingredients || []).join("\n")}\nSteps:\n${(recipe.steps || []).join("\n")}`;
+  async function splitPlate() {
+    setBusy("plate"); setErr("");
+    try {
+      const t = await ask(`${householdSummary()}\n\n${recipeText}\n\n${person.name} won't eat: ${avoid.join(", ") || "nothing listed"}. Everyone else is having this recipe as written. In 2 or 3 short sentences, tell the cook how to plate ${person.name}'s portion: what to leave off or set aside before it's added, and one easy side or base to give ${person.name} instead, using equipment and ingredients this kitchen likely has. Start with "${person.name}'s plate:". Plain text only.`, 300);
+      setNote(t.replace(/```/g, "").trim());
+    } catch (e) { setErr(e.message); }
+    setBusy("");
+  }
+  async function rewrite() {
+    setBusy("rewrite"); setErr("");
+    try {
+      const t = await ask(`${householdSummary()}\n\n${recipeText}\n\nRewrite this recipe so ${person.name} can eat it: remove or replace ${avoid.join(", ")}, keeping the dish as close to the original as possible. Return ONLY a JSON object, no markdown, with fields title, description, servings, prepTime, cookTime, ingredients (array of strings), steps (array of strings), notes. The title should be the original title plus a short note like "(no rice)".`, 3000);
+      const s = t.indexOf("{"), e = t.lastIndexOf("}");
+      const j = JSON.parse(t.slice(s, e + 1));
+      const fresh = { ...recipe, ...j, id: uid(), photos: [], photo: null, rating: null, staple: false, favorite: false,
+        tags: [...new Set([...(recipe.tags || []), "adapted"])], source: recipe.source || "", key_ingredients: undefined };
+      onEditNew(fresh);
+    } catch (e) { setErr("Couldn't rewrite it: " + e.message); }
+    setBusy("");
+  }
+  function saveNote() {
+    const existing = recipe.notes || "";
+    const lines = existing.split("\n").filter(l => !l.startsWith(`${person.name}'s plate:`));
+    onSaveRecipe({ ...recipe, notes: [...lines, note].filter(Boolean).join("\n") });
+    onClose();
+  }
+  if (!person) return null;
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{maxWidth:460}}>
+        <div className="modal-title">Adapt for…</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+          {people.map(p => <button key={p.id} className={`btn btn-sm ${p.id === who ? "btn-primary" : "btn-outline"}`} onClick={() => { setWho(p.id); setNote(""); }}>{p.name}</button>)}
+        </div>
+        <p style={{fontSize:13,color:"var(--ink-mid)",marginTop:0}}>{person.name} won't eat: <strong>{avoid.join(", ") || "nothing listed"}</strong></p>
+        <button className="btn btn-outline" style={{width:"100%",marginBottom:8,textAlign:"left"}} disabled={!!busy} onClick={splitPlate}>
+          🍽 <strong>Split plate</strong> — keep the recipe, note how to make {person.name}'s plate {busy === "plate" && "…"}
+        </button>
+        <button className="btn btn-outline" style={{width:"100%",textAlign:"left"}} disabled={!!busy} onClick={rewrite}>
+          ✏️ <strong>Change it for everyone</strong> — save a new version without it {busy === "rewrite" && "…"}
+        </button>
+        {err && <p style={{color:"var(--rust)",fontSize:13}}>{err}</p>}
+        {note && (
+          <div style={{marginTop:12}}>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={4} style={{width:"100%",boxSizing:"border-box",padding:8,fontSize:14,fontFamily:"inherit"}} />
+            <button className="btn btn-primary btn-sm" style={{marginTop:6}} onClick={saveNote}>Save to recipe notes</button>
+          </div>
+        )}
+        <button className="btn btn-ghost" style={{marginTop:10}} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
   const [calData, setCalData] = useState(()=>loadCalendar());
   useEffect(()=>{ if(version>0) setCalData(loadCalendar()); },[version]);
@@ -7790,11 +8085,14 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
     if(!e) return [];
     return Array.isArray(e)?e:[e];
   }
-  function addMeal(dk,slot,recipeId,servings=1,isLeftover=false) {
+  const [sidePicker, setSidePicker] = useState(null); // {dk, slot, member}
+  function addMeal(dk,slot,recipeId,servings=1,isLeftover=false,forMember=null) {
     setCalData(d=>{
       const arr=getSlotArr(d,dk,slot);
       if(arr.some(e=>e.id===recipeId)) return d; // already there
-      return {...d,[dk]:{...(d[dk]||{}),[slot]:[...arr,{id:recipeId,servings,leftover:isLeftover}]}};
+      const entry={id:recipeId,servings,leftover:isLeftover};
+      if(forMember) entry.forMember=forMember;
+      return {...d,[dk]:{...(d[dk]||{}),[slot]:[...arr,entry]}};
     });
   }
   function removeMeal(dk,slot,recipeId) {
@@ -7815,14 +8113,15 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
       return updated;
     });
   }
-  function assignWithLeftovers(dk,slot,recipeId,servings,leftoverSlot,leftoverDays) {
+  function assignWithLeftovers(dk,slot,recipeId,servings,leftoverSlot,leftoverDays,forMember=null) {
     setCalData(d=>{
       const arr=getSlotArr(d,dk,slot);
-      let u={...d,[dk]:{...(d[dk]||{}),[slot]:arr.some(e=>e.id===recipeId)?arr:[...arr,{id:recipeId,servings,leftover:false}]}};
+      const fm=forMember?{forMember}:{};
+      let u={...d,[dk]:{...(d[dk]||{}),[slot]:arr.some(e=>e.id===recipeId)?arr:[...arr,{id:recipeId,servings,leftover:false,...fm}]}};
       for(let i=1;i<=leftoverDays;i++){
         const lk=addDays(dk,i);
         const larr=getSlotArr(u,lk,leftoverSlot);
-        u={...u,[lk]:{...(u[lk]||{}),[leftoverSlot]:larr.some(e=>e.id===recipeId)?larr:[...larr,{id:recipeId,servings,leftover:true}]}};
+        u={...u,[lk]:{...(u[lk]||{}),[leftoverSlot]:larr.some(e=>e.id===recipeId)?larr:[...larr,{id:recipeId,servings,leftover:true,...fm}]}};
       }
       return u;
     });
@@ -7915,7 +8214,11 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
                             <div style={{fontFamily:"'Playfair Display',serif",fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                               {entry.leftover&&<span style={{fontSize:10,background:SLOT_COLORS[slot]+"33",color:SLOT_COLORS[slot],padding:"1px 5px",borderRadius:10,marginRight:5,fontFamily:"'Lato',sans-serif",fontWeight:700}}>↩ LEFTOVER</span>}
                               {recipe.title}
+                              {entry.forMember&&<span style={{fontSize:10,background:"#e3e0f3",padding:"1px 6px",borderRadius:10,marginLeft:6,fontFamily:"'Lato',sans-serif",fontWeight:700}}>for {memberName(entry.forMember)}</span>}
                             </div>
+                            {!entry.forMember&&!entry.leftover&&<MealConflicts recipe={recipe}
+                              coveredIds={slotEntries.filter(x=>x.forMember).map(x=>x.forMember)}
+                              onSide={member=>setSidePicker({dk,slot,member})} />}
                             <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4,flexWrap:"wrap"}}>
                               <div style={{display:"flex",alignItems:"center",gap:4}}>
                                 <span style={{fontSize:11,color:"var(--ink-light)"}}>Servings:</span>
@@ -8121,13 +8424,18 @@ function CalendarTab({ recipes, version, onQuickAddRecipe, onStartMealCook }) {
           dateKey={assignModal.dateKey} slot={assignModal.slot}
           recipes={recipes} currentIds={(()=>{const e=calData[assignModal.dateKey]?.[assignModal.slot];return Array.isArray(e)?e.map(x=>x.id):(e?[e.id]:[]);})()}
           onQuickAddRecipe={onQuickAddRecipe}
-          onAssign={(recipeId,servings,leftoverSlot,leftoverDays)=>{
-            if(leftoverSlot&&leftoverDays>0) assignWithLeftovers(assignModal.dateKey,assignModal.slot,recipeId,servings,leftoverSlot,leftoverDays);
-            else addMeal(assignModal.dateKey,assignModal.slot,recipeId,servings);
+          onAssign={(recipeId,servings,leftoverSlot,leftoverDays,forMember)=>{
+            if(leftoverSlot&&leftoverDays>0) assignWithLeftovers(assignModal.dateKey,assignModal.slot,recipeId,servings,leftoverSlot,leftoverDays,forMember);
+            else addMeal(assignModal.dateKey,assignModal.slot,recipeId,servings,false,forMember);
             setAssignModal(null);
           }}
           onClose={()=>setAssignModal(null)}
         />
+      )}
+      {sidePicker&&(
+        <SidePickerModal member={sidePicker.member} recipes={recipes}
+          onPick={r=>{ addMeal(sidePicker.dk,sidePicker.slot,r.id,1,false,sidePicker.member.id); setSidePicker(null); }}
+          onClose={()=>setSidePicker(null)} />
       )}
     </div>
   );
@@ -8879,6 +9187,7 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], onQuickAddReci
   const [leftoverDays,setLeftoverDays]=useState(2);
   const [step,setStep]=useState("pick");
   const [quickAdding,setQuickAdding]=useState(false);
+  const [forMember,setForMember]=useState(null);
 
   const filtered=recipes.filter(r=>{
     const q=search.toLowerCase();
@@ -8915,6 +9224,19 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], onQuickAddReci
             <button className="scaler-btn" onClick={()=>setServings(s=>s+0.25)}>+</button>
           </div>
         </div>
+        {householdPeople().length>0&&(
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"var(--ink-mid)",marginBottom:8}}>Who's eating?</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button className={`btn btn-sm ${!forMember?"btn-primary":"btn-outline"}`} onClick={()=>setForMember(null)}>Everyone</button>
+              {householdPeople().map(p=><button key={p.id} className={`btn btn-sm ${forMember===p.id?"btn-primary":"btn-outline"}`}
+                onClick={()=>{setForMember(p.id); setServings(1);}}>Just {p.name}</button>)}
+            </div>
+            {chosenRecipe&&!forMember&&memberConflicts(chosenRecipe).length>0&&(
+              <div style={{fontSize:12,color:"var(--rust)",marginTop:8}}>⚠ {memberConflicts(chosenRecipe).map(conflictLabel).join(" · ")} — you can add a side for them from the calendar.</div>
+            )}
+          </div>
+        )}
         <p style={{fontSize:14,color:"var(--ink-mid)",marginBottom:16,lineHeight:1.6}}>
           Making <strong>{chosenRecipe?.title}</strong> for {MEAL_LABELS[slot].split(" ")[1]} on {dateLabel}. Will you eat leftovers over the next few days?
         </p>
@@ -8939,7 +9261,7 @@ function AssignMealModal({ dateKey, slot, recipes, currentIds=[], onQuickAddReci
           </div>
         )}
         <div style={{display:"flex",gap:8}}>
-          <button className="btn btn-primary" onClick={()=>onAssign(chosen,servings,hasLeftovers?leftoverSlot:null,hasLeftovers?leftoverDays:0)}>Save to Calendar</button>
+          <button className="btn btn-primary" onClick={()=>onAssign(chosen,servings,hasLeftovers?leftoverSlot:null,hasLeftovers?leftoverDays:0,forMember)}>Save to Calendar</button>
           <button className="btn btn-ghost" onClick={()=>setStep("pick")}>← Back</button>
         </div>
       </div>
