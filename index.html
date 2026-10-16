@@ -1215,8 +1215,11 @@ function RecipeBook() {
     return recipes.find(r => r.id !== excludeId && (() => {
       const b = norm(r.title);
       if (a === b) return true;
-      // Check if one contains the other (handles "Ed's Nashville Chicken" vs "Nashville Chicken")
-      if (a.length > 6 && b.length > 6 && (a.includes(b) || b.includes(a))) return true;
+      // Check if one contains the other (handles "Ed's Nashville Chicken" vs "Nashville Chicken"),
+      // but only when the shorter title covers most of the longer one — otherwise a short
+      // title like "Spaghetti" would match every recipe with "spaghetti" in its name.
+      const shorter = a.length <= b.length ? a : b, longer = a.length <= b.length ? b : a;
+      if (shorter.length > 6 && longer.includes(shorter) && shorter.length / longer.length >= 0.7) return true;
       // Levenshtein-lite: if strings are very close in length and share 85%+ chars
       if (Math.abs(a.length - b.length) <= 3) {
         let matches = 0;
@@ -1425,7 +1428,7 @@ function RecipeBook() {
         {tab==="discover" && <DiscoverTab recipes={recipes} onAddRecipe={r=>{
           const dup = findDuplicate(r.title, r.id);
           if (dup) {
-            if (!window.confirm(`"${dup.title}" looks similar to "${r.title}". Save anyway?`)) return;
+            if (!window.confirm(`"${r.title}" looks similar to your existing recipe "${dup.title}". Save anyway?`)) return;
           }
           upsertRecipe(r); setTab("library");
         }} />}
@@ -1453,7 +1456,7 @@ function RecipeBook() {
               onImport={r=>{
                 const dup = findDuplicate(r.title, r.id);
                 if (dup) {
-                  if (!window.confirm(`"${dup.title}" looks like a duplicate of "${r.title}". Save anyway?`)) return;
+                  if (!window.confirm(`"${r.title}" looks like a duplicate of your existing recipe "${dup.title}". Save anyway?`)) return;
                 }
                 upsertRecipe(r); setShowAddMenu(false); setPendingShareData(null); setEditRecipe(r); setTab("library");
               }} />
@@ -1465,7 +1468,7 @@ function RecipeBook() {
           if (!editRecipe) {
             const dup = findDuplicate(r.title, r.id);
             if (dup) {
-              if (!window.confirm(`"${dup.title}" looks similar to "${r.title}". Save anyway?`)) return;
+              if (!window.confirm(`"${r.title}" looks similar to your existing recipe "${dup.title}". Save anyway?`)) return;
             }
           }
           upsertRecipe(r); setShowAdd(false); setEditRecipe(null);
